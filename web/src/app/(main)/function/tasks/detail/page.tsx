@@ -209,7 +209,7 @@ function TaskDetailInner() {
           <span className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs">
             <BrainIcon className="size-3.5 text-emerald-500" /> {tr("taskDetail.header.llmConfigured")}
           </span>
-          <StatusBadge domain="engine" value={engineMode} dot />
+          <StatusBadge domain={terminal ? "task" : "engine"} value={terminal ? task.status : engineMode} dot />
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={openEdit}>
               <PencilIcon /> {tr("taskDetail.header.edit")}
