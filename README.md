@@ -46,7 +46,7 @@ v2.0 is about one thing — **turning "can find it" into "can deliver it."** The
 <img src="screenshots/findings-en.png" alt="English findings workspace with synthetic demo data" width="860" />
 </div>
 
-**③ Every step auto-linked to its real traffic.** All requests the agent makes are captured in full via MITM recording; when a finding is recorded, the system links each step to its corresponding real packet by time window and step order. One click shows the original request/response, with syntax highlighting, body search, and match counts — no need to go back to a proxy tool and reconstruct it.
+**③ Every step auto-linked to its real traffic.** Enable **Traffic capture** in System Settings to record requests routed through the MITM proxy; capture is off by default. When a finding is recorded, the system links each step to its corresponding real packet by time window and step order. One click shows the original request/response, with syntax highlighting, body search, and match counts — no need to go back to a proxy tool and reconstruct it.
 
 <div align="center">
 <img src="screenshots/traffic-packet.png" alt="English request and response viewer with synthetic demo data" width="860" />
@@ -93,6 +93,15 @@ CGO_ENABLED=0 go build -tags embedui -o antifox ./cmd/antifox
 Full steps (skill embedding, dev hot-reload) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 > **One-click update:** for a binary/source deploy, launch via `./start.sh` or systemd (see [`deploy/antifox.service`](deploy/antifox.service), set `RestartForceExitStatus=75`) to check for and install new versions from **System Settings** (SHA256 verify / atomic swap / rollback; data unaffected). Updates are available only after releases are published in this fork. Development builds use the source build workflow. For Docker, pull the latest source and run `docker compose up -d --build`.
+
+### Run and review a task
+
+1. Configure an LLM profile in **System Settings**, then create a task with a target, explicit scope, and a measurable goal. A task pinned to a profile uses that profile's model.
+2. Enable **Traffic capture** before starting if you need saved HTTP exchanges. Changes apply to subsequent agent runs; an already-running worker retains its current settings until its next run.
+3. Follow the planner and workers in the task's **Sessions** tab. **Idle** means no worker is executing; check the task status and goal progress. **Done** means the goals were met. **Failed** may include a provider refusal; read the session error and review the request and provider policies before retrying.
+4. Review findings against their actual request/response evidence. Mark unsupported findings **False positive**; these are excluded from generated reports. Generate and download the English report after review.
+
+The Docker image uses its bundled Chromium for the browser MCP. Source installations must provide a compatible browser executable through `PLAYWRIGHT_MCP_EXECUTABLE_PATH` or the MCP `--executable-path` option.
 
 ## More Screens
 

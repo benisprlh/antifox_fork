@@ -185,6 +185,9 @@ func (s *Server) buildReportInput(t *Task, q map[string][]string) *report.GenInp
 		// Reuse persisted enrichment from the findings page's AI analysis so the report
 		// is consistent with what the user reviewed and skips a redundant LLM call.
 		if enr, _ := s.m.pg.GetFindingEnrichment(n.ID); enr != nil {
+			if enr.Status == "false_positive" {
+				continue // A finding rejected during review must not reappear as a vulnerability.
+			}
 			fi.Enrichment = reportEnrichmentFromDB(enr)
 			if strings.TrimSpace(enr.Severity) != "" {
 				fi.Severity = enr.Severity // honor human severity override (language-agnostic)

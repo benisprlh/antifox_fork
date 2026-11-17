@@ -817,7 +817,7 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	if tr := s.m.Traffic(); tr != nil {
 		c, _ := tr.Count()
 		out["traffic"] = c
-		out["traffic_enabled"] = true
+		out["traffic_enabled"] = s.m.TrafficEnabled()
 	}
 	if counts, err := s.m.Assets().CountsByType(); err == nil {
 		total := 0
@@ -1912,6 +1912,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if changed {
 		// rebuild agents so the new proxy/tools/prompt/web-search take hold (only if LLM configured).
+		s.invalidateProfileAgents() // Pinned tasks and role-bound agents must receive the same settings.
 		s.cfgMu.Lock()
 		cfg, on := s.llmCfg, s.llmOn
 		s.cfgMu.Unlock()

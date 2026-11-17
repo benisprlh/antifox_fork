@@ -45,6 +45,13 @@ RUN apt-get update \
     && playwright-cli --help \
     && playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
+# Playwright MCP otherwise looks for Google Chrome, which is not installed here.
+# Give MCP a stable executable path; isolated profiles allow concurrent workers.
+ENV NODE_PATH=/usr/lib/node_modules \
+    PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/local/bin/antifox-chromium \
+    PLAYWRIGHT_MCP_ISOLATED=true \
+    PLAYWRIGHT_MCP_SANDBOX=false
+COPY --chmod=0755 deploy/chromium-launcher.sh /usr/local/bin/antifox-chromium
 # Reports require python-docx; Go invokes report_builder.py as a subprocess.
 RUN pip install --no-cache-dir python-docx
 WORKDIR /app
