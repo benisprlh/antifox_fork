@@ -3,7 +3,14 @@
 web/.next
 web/out
 server/webui/dist
+server/skillsdist
+.env
+config.json
+**/__pycache__
 /antifox
 data
 *.db
 transcripts
+
+**/.env.local
+**/.env.*.local

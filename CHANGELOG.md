@@ -2,6 +2,14 @@
 
 Release highlights for this project. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased — English fork
+
+- Translate the UI, documentation, built-in prompts, backend messages, demo content, scripts, and source comments into English.
+- Default the interface and generated reports to English, including legacy language selections.
+- Replace Mandarin screenshots with English screenshots using synthetic demo data.
+- Build the English fork from source with Docker Compose or the local installer. Check this fork's releases for updates.
+- Check tracked text for untranslated Mandarin alongside frontend translation keys.
+
 ## v2.0.3
 
 - **Custom LLM session header**: Each LLM configuration can specify an HTTP header whose value is automatically set to the current session ID. This supports gateways such as opencode that use sessions for prompt caching or sticky routing.

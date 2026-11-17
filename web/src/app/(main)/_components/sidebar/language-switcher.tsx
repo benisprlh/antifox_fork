@@ -22,6 +22,8 @@ export function LanguageSwitcher() {
     if (typeof document !== "undefined") document.documentElement.lang = code;
   };
 
+  if (LANGS.length < 2) return null;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

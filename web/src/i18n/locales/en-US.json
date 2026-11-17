@@ -15,7 +15,7 @@
     "foundNew": "New version {{version}} available",
     "checkFailed": "Update check failed: {{msg}}",
     "devBuild": "This is a development build; one-click update is disabled.",
-    "dockerHint": "Docker deployment detected: pull a new image and recreate the container (your data is in an external database/volume and is unaffected).",
+    "dockerHint": "Docker deployment detected: update the fork source and rebuild the container. Data remains in the external database and volumes.",
     "releaseNotes": "{{version}} release notes",
     "starting": "Preparing…",
     "working": "Updating…",
@@ -24,7 +24,7 @@
     "updated": "Updated to {{version}}, reloading…",
     "failed": "Update failed: {{msg}}",
     "startFailed": "Failed to start update: {{msg}}",
-    "supervisorHint": "One-click update relies on a supervisor to restart the process: on bare metal launch via start.sh, for systemd set RestartForceExitStatus=75; running the binary directly won't relaunch after exit. Docker users use docker compose pull."
+    "supervisorHint": "One-click update relies on a supervisor to restart the process: on bare metal launch via start.sh, for systemd set RestartForceExitStatus=75; running the binary directly won't relaunch after exit. Docker users rebuild from the latest fork source with docker compose up -d --build."
   },
   "lang": {
     "switch": "Language"
@@ -1904,8 +1904,6 @@
     "genDone": "Report generated",
     "genFailed": "Generation failed: {{msg}}",
     "language": "Report Language",
-    "langZhCN": "Simplified Chinese",
-    "langZhTW": "Traditional Chinese",
     "langEnUS": "English",
     "selectFindings": "Select Findings",
     "findingsAll": "All",

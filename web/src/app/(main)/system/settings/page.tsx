@@ -212,7 +212,7 @@ export default function SystemSettingsPage() {
         <p className="text-muted-foreground text-sm">{t("settings.subtitle")}</p>
       </div>
 
-      {/* 2 列自适应瀑布流：窄屏单列，≥lg 双列按列紧凑排布(避免行高对齐留白) */}
+      {/* Responsive masonry: one column on narrow screens, two compact columns from lg. */}
       <div className="columns-1 gap-4 md:gap-6 lg:columns-2 [&>*]:mb-4 md:[&>*]:mb-6 [&>*]:break-inside-avoid">
       <UpdateCard />
 

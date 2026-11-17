@@ -13,7 +13,7 @@ import type { TrafficDetail, TrafficExchange } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function fmtTime(ts: string) {
-  return new Date(ts).toLocaleString("zh-CN", {
+  return new Date(ts).toLocaleString("en-US", {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -22,8 +22,8 @@ function fmtTime(ts: string) {
   });
 }
 
-// PacketShotModal：全屏「截图模式」——请求+响应一屏、顶部自说明头(方法/状态/目标/URL/时间)，
-// 专为替代 Burp 截图。自行按需加载报文正文。流量页与漏洞详情(关联流量)共用。
+// PacketShotModal displays request/response together with method/status/target/URL/time metadata.
+// It loads bodies on demand and is shared by traffic and finding details.
 export function PacketShotModal({ exchange, onClose }: { exchange: TrafficExchange; onClose: () => void }) {
   const { t } = useTranslation();
   const [detail, setDetail] = React.useState<TrafficDetail | null>(null);

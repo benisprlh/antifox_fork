@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 
 import { api } from "@/lib/api";
 
-// 当前登录用户的权限集合（来自 /api/rbac/me）。用于按权限隐藏 nav / 按钮。
-// 模块级缓存：整个会话只拉一次。
+// Current user's permissions from /api/rbac/me control navigation/button visibility.
+// Module-level cache fetches once per session.
 let cached: Set<string> | null = null;
 let inflight: Promise<Set<string>> | null = null;
 

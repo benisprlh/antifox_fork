@@ -147,6 +147,7 @@ func scanReportTemplate(sc interface{ Scan(...any) error }) (*ReportTemplate, er
 		return nil, err
 	}
 	rt.Personnel = json.RawMessage(pj)
+	rt.Locale = "en-US"
 	return rt, nil
 }
 
@@ -192,7 +193,7 @@ func (d *DB) AddReportTemplate(rt *ReportTemplate) (int64, error) {
 	err := d.QueryRow(`INSERT INTO report_templates (name, company_name, company_name_en, logo_path, personnel_json, cvss_version, locale)
 		VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7) RETURNING id`,
 		rt.Name, rt.CompanyName, rt.CompanyNameEn, rt.LogoPath, personnelJSON(rt.Personnel),
-		defStr(rt.CVSSVersion, "3.1"), defStr(rt.Locale, "zh-CN")).Scan(&id)
+		defStr(rt.CVSSVersion, "3.1"), "en-US").Scan(&id)
 	return id, err
 }
 
@@ -201,7 +202,7 @@ func (d *DB) UpdateReportTemplate(rt *ReportTemplate) error {
 	_, err := d.Exec(`UPDATE report_templates SET name=$1, company_name=$2, company_name_en=$3, logo_path=$4,
 		personnel_json=$5::jsonb, cvss_version=$6, locale=$7, updated_at=now() WHERE id=$8`,
 		rt.Name, rt.CompanyName, rt.CompanyNameEn, rt.LogoPath, personnelJSON(rt.Personnel),
-		defStr(rt.CVSSVersion, "3.1"), defStr(rt.Locale, "zh-CN"), rt.ID)
+		defStr(rt.CVSSVersion, "3.1"), "en-US", rt.ID)
 	return err
 }
 

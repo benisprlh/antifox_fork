@@ -15,7 +15,11 @@ services:
     restart: unless-stopped
 
   antifox:
-    image: ghcr.io/antifox-ai/antifox:${ANTIFOX_TAG:-latest}
+    image: antifox-english:local
+    build:
+      context: .
+      args:
+        BINARY_SOURCE: source
     depends_on:
       postgres:
         condition: service_healthy

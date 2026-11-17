@@ -9,8 +9,7 @@ From recon to report delivery — multi-agent, autonomous · fully observable ·
 [Documentation](README.md) | [Changelog](CHANGELOG.md) | [Contributing](CONTRIBUTING.md)
 
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
-[![Upstream release](https://img.shields.io/github/v/release/AntiFox-AI/antifox?color=success)](https://github.com/AntiFox-AI/antifox/releases/latest)
-[![Docker](https://img.shields.io/badge/GHCR-ghcr.io%2Fantifox--ai%2Fantifox-2496ED?logo=docker&logoColor=white)](https://github.com/AntiFox-AI/antifox/pkgs/container/antifox)
+[![English fork](https://img.shields.io/badge/language-English-blue)](https://github.com/benisprlh/antifox_fork)
 [![Go](https://img.shields.io/badge/Go-1.26.3+-00ADD8?logo=go&logoColor=white)](go.mod)
 
 <img src="screenshots/login-en.png" alt="AntiFox" width="860" />
@@ -21,9 +20,9 @@ From recon to report delivery — multi-agent, autonomous · fully observable ·
 
 ## About This Fork
 
-This repository, [benisprlh/antifox_fork](https://github.com/benisprlh/antifox_fork), is a fork of [AntiFox-AI/antifox](https://github.com/AntiFox-AI/antifox) with English documentation. Source history, original credits, and the AGPL-3.0 license are retained.
+This repository, [benisprlh/antifox_fork](https://github.com/benisprlh/antifox_fork), is a fork of [AntiFox-AI/antifox](https://github.com/AntiFox-AI/antifox) with an English UI, documentation, built-in agent prompts, backend messages, demo data, and reports. Source history, original credits, and the AGPL-3.0 license are retained.
 
-The prebuilt binaries, container image, and one-click updater described below use upstream AntiFox releases. The Docker setup below mounts this fork's translated skills; build from source to embed them in a binary. Some upstream screenshots contain Chinese interface text.
+Build this fork from source or use the Docker build below to run the English version. The updater checks this fork's releases; no upstream binary is installed automatically. Legacy saved language selections resolve to English. Existing user-created content and captured evidence remain verbatim; saved prompts can be reset to the English built-in defaults in Agent settings.
 
 ## Overview
 
@@ -36,7 +35,7 @@ Unlike most automated pentest tools that are "great at discovery, but stop at di
 v2.0 is about one thing — **turning "can find it" into "can deliver it."** The agent fixes the reproduction steps and evidence in place while it works, so the engineer's job shifts from "assembling a report from scratch" to "verify and confirm."
 
 <div align="center">
-<img src="screenshots/demo.gif" alt="AntiFox demo" width="880" />
+<img src="screenshots/task-detail-en.png" alt="English task session with synthetic demo data" width="880" />
 </div>
 
 **① Reproduction captured in place.** As the agent exploits, each step's request, response, expected outcome, and verification conclusion are recorded as structured data — not reconstructed after the fact — eliminating the old "incomplete or fabricated reproduction" problem.
@@ -44,22 +43,18 @@ v2.0 is about one thing — **turning "can find it" into "can deliver it."** The
 **② Findings laid out as a kill chain.** A finding is no longer "one command plus a verdict," but a full chain from entry point and preconditions through each exploitation step, each in plain language paired with a real request — so an engineer opening the finding immediately grasps where it came from and how it was chained.
 
 <div align="center">
-<img src="screenshots/finding-steps.png" alt="Kill chain, step by step" width="860" />
+<img src="screenshots/findings-en.png" alt="English findings workspace with synthetic demo data" width="860" />
 </div>
 
 **③ Every step auto-linked to its real traffic.** All requests the agent makes are captured in full via MITM recording; when a finding is recorded, the system links each step to its corresponding real packet by time window and step order. One click shows the original request/response, with syntax highlighting, body search, and match counts — no need to go back to a proxy tool and reconstruct it.
 
 <div align="center">
-<img src="screenshots/traffic-packet.png" alt="Each step linked to its real packet" width="860" />
+<img src="screenshots/traffic-packet.png" alt="English request and response viewer with synthetic demo data" width="860" />
 </div>
 
 **④ The packet is the evidence.** For findings like sensitive-information disclosure, the traffic packet itself is the proof — no more stitching together screenshots afterwards.
 
-<div align="center">
-<img src="screenshots/env-leak.png" alt="The packet is the evidence" width="860" />
-</div>
-
-**⑤ Human-grade trilingual reports.** AI narrative + python-docx rendered into a delivery-grade `.docx` (cover / TOC / page numbers / per-vuln tables with structured reproduction), as a full report in Simplified Chinese / Traditional Chinese / English.
+**⑤ English reports.** AI narrative + python-docx rendered into a delivery-grade `.docx` (cover / TOC / page numbers / per-vuln tables with structured reproduction), with English headings, narrative, and fallback content.
 
 > All UI data shown is synthetic demo data from a local test range.
 
@@ -67,31 +62,20 @@ v2.0 is about one thing — **turning "can find it" into "can deliver it."** The
 
 Requires **PostgreSQL**; exploration needs an **LLM** (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, or configure it in the UI). Generating `.docx` reports needs `python3` + `python-docx` (bundled in the Docker image).
 
-### Option 1: One-command Docker deploy (recommended)
+### Option 1: Docker build (recommended)
 
 ```bash
 git clone https://github.com/benisprlh/antifox_fork.git
 cd antifox_fork
 cp .env.example .env          # set POSTGRES_PASSWORD
-docker compose up -d          # pulls the image + PostgreSQL and starts
+docker compose up -d --build  # builds this fork and starts PostgreSQL
 ```
 
 Open **http://localhost:8787** — on first run, go to `/setup` to set the admin password.
 
-### Option 2: Prebuilt binary
+### Option 2: Build from source
 
-Download the zip for your platform from [upstream Releases](https://github.com/AntiFox-AI/antifox/releases/latest) (Linux amd64/arm64 · macOS amd64/arm64 · Windows amd64), then:
-
-```bash
-cp config.example.json config.json    # fill in the database connection
-./antifox                             # antifox.exe on Windows
-```
-
-Open **http://localhost:8787**.
-
-### Option 3: Build from source
-
-The **full source is open** (AGPL-3.0). Requires Go 1.26.3+ / Node 20+ / PostgreSQL / Python 3 (report rendering):
+The **full source is open** (AGPL-3.0). Requires Go 1.26.3+ / Node 22+ / PostgreSQL / Python 3 (report rendering):
 
 ```bash
 git clone https://github.com/benisprlh/antifox_fork.git
@@ -108,13 +92,21 @@ CGO_ENABLED=0 go build -tags embedui -o antifox ./cmd/antifox
 
 Full steps (skill embedding, dev hot-reload) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-> **One-click update:** for a binary/source deploy, launch via `./start.sh` or systemd (see [`deploy/antifox.service`](deploy/antifox.service), set `RestartForceExitStatus=75`) to check for and install new versions from **System Settings** (SHA256 verify / atomic swap / rollback; data unaffected). For Docker, use `docker compose pull`.
+> **One-click update:** for a binary/source deploy, launch via `./start.sh` or systemd (see [`deploy/antifox.service`](deploy/antifox.service), set `RestartForceExitStatus=75`) to check for and install new versions from **System Settings** (SHA256 verify / atomic swap / rollback; data unaffected). Updates are available only after releases are published in this fork. Development builds use the source build workflow. For Docker, pull the latest source and run `docker compose up -d --build`.
 
 ## More Screens
 
 | Dashboard | Tasks |
 | :---: | :---: |
 | ![Dashboard](screenshots/dashboard-en.png) | ![Tasks](screenshots/tasks-en.png) |
+
+| Traffic | Reports |
+| :---: | :---: |
+| ![Traffic](screenshots/traffic-en.png) | ![Reports](screenshots/reports-en.png) |
+
+| Agents |
+| :---: |
+| ![Agents](screenshots/agents-en.png) |
 
 ## Lineage
 
@@ -129,10 +121,10 @@ Building on its solid foundation (exploration-graph engine, MITM traffic recordi
 | Area | Details |
 | --- | --- |
 | **Evidence-driven delivery** | Reproduction captured in place, findings laid out as a kill chain, every step auto-linked to its real packet (syntax highlight / body search / match counts) |
-| **Human-grade reports** | AI narrative + python-docx into delivery-grade .docx (cover / TOC / page numbers / per-vuln tables), full report in zh / zh-TW / en |
+| **Human-grade reports** | AI narrative + python-docx into delivery-grade .docx (cover / TOC / page numbers / per-vuln tables), English report content |
 | Report management | Org settings, named templates (issuer / logo / personnel / CVSS), per-task generation, select which findings to include |
 | Deeper vuln management | AI enrichment into structured data (CVSS / impact / fix / structured reproduction), 4 severity levels, batch enrichment, session finding capture |
-| Trilingual i18n | Full UI in Simplified Chinese / Traditional Chinese / English |
+| English interface | English UI, backend messages, built-in prompts, and demo data |
 | Multi-user RBAC | Visual permission-matrix custom roles, system roles, resource-level scope, login audit |
 | Knowledge-base RAG | Global + per-task two-tier pgvector retrieval augmentation for agents |
 | One-click update | Check for and install a new version from GitHub Releases (SHA256 verify / atomic swap / auto-rollback) right from System Settings — your data is untouched |
@@ -172,18 +164,12 @@ flowchart TB
 - Dual-graph: global asset graph + per-task exploration graph, linked by anchors
 - Multi-agent orchestration: event-driven engine, planner produces intents / N workers execute / mainagent is the human interface
 - Evidence-driven delivery: reproduction captured in place, findings as a kill chain, every step linked to its real packet
-- Human-grade trilingual reports: AI narrative + python-docx delivery-grade .docx
+- English reports: AI narrative + python-docx delivery-grade .docx
 - MITM traffic recording, rule-based HITL interception, MCP / Skill extension system, pgvector knowledge base
 
-## Follow Us
+## Upstream Community
 
-For hands-on write-ups, feature explanations, and release updates, follow the upstream project's WeChat Official Account:
-
-<div align="center">
-<img src="screenshots/wechat-qr.jpg" alt="AntiFox WeChat Official Account" width="200" />
-<br/>
-<sub>Scan on WeChat · <b>AntiFox</b></sub>
-</div>
+Project news and community links are available in the [upstream repository](https://github.com/AntiFox-AI/antifox).
 
 ## Credits
 

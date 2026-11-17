@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// 校验：扫 src 下所有 t("key")/t('key') 引用，跟 zh-CN.json 对账。
-// 报告：① 代码引用但 JSON 缺失的键（会显示原始 key，需补）；② 残留中文硬编码文件。
+// Check src t("key")/t('key') references against en-US.json.
+// Report missing translation keys and remaining hardcoded Chinese text.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const SRC = new URL("../web/src/", import.meta.url).pathname;
-const zhCN = JSON.parse(readFileSync(join(SRC, "i18n/locales/zh-CN.json"), "utf8"));
+const enUS = JSON.parse(readFileSync(join(SRC, "i18n/locales/en-US.json"), "utf8"));
 
 function walk(dir, acc = []) {
   for (const e of readdirSync(dir)) {
@@ -31,9 +33,9 @@ for (const f of files) {
   let m;
   while ((m = KEY_RE.exec(src))) {
     const key = m[1];
-    if (!key.includes(".")) continue; // 跳过非命名空间键（如变量）
+    if (!key.includes(".")) continue; // Skip unnamespaced keys such as variables.
     refCount++;
-    if (!hasKey(zhCN, key)) {
+    if (!hasKey(enUS, key)) {
       const rel = f.replace(SRC, "");
       if (!missing.has(key)) missing.set(key, new Set());
       missing.get(key).add(rel);
@@ -41,30 +43,34 @@ for (const f of files) {
   }
 }
 
-console.log(`扫描 ${files.length} 文件，${refCount} 处 t() 引用。`);
+console.log(`Scanned ${files.length} files and ${refCount} t() references.`);
 if (missing.size === 0) {
-  console.log("✓ 所有 t() 键在 zh-CN.json 中都存在。");
+  console.log("✓ All t() keys exist in en-US.json.");
 } else {
-  console.log(`✗ ${missing.size} 个键在 zh-CN.json 缺失：`);
+  console.log(`✗ ${missing.size} keys missing from en-US.json:`);
   for (const [k, fs] of missing) console.log(`  ${k}  ← ${[...fs].join(", ")}`);
 }
 
-// 残留中文（排除注释行与 locales 目录）
-const CJK = /[一-鿿]/;
+// Check all tracked UTF-8 text, including documentation, comments, and mock data.
+// Unicode escapes remain available for legacy input aliases and multilingual tests.
+const ROOT = fileURLToPath(new URL("../", import.meta.url));
+const CJK = /\p{Script=Han}/u;
 const residual = [];
-for (const f of files) {
-  if (f.includes("/i18n/locales/") || f.includes("/lib/mock/")) continue;
-  const lines = readFileSync(f, "utf8").split("\n");
-  let n = 0;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue; // 注释
-    if (CJK.test(line)) n++;
+const tracked = execFileSync("git", ["ls-files", "-z"], { cwd: ROOT, encoding: "utf8" }).split("\0").filter(Boolean);
+for (const f of tracked) {
+  let content;
+  try {
+    const bytes = readFileSync(join(ROOT, f));
+    content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    if (error.code === "ENOENT" || error instanceof TypeError) continue;
+    throw error;
   }
-  if (n > 0) residual.push([f.replace(SRC, ""), n]);
+  const n = content.split("\n").filter((line) => CJK.test(line)).length;
+  if (n > 0) residual.push([f, n]);
 }
 residual.sort((a, b) => b[1] - a[1]);
-console.log(`\n残留含中文（非注释、非 mock/locale）文件 ${residual.length} 个：`);
+console.log(`\nTracked text files containing Chinese: ${residual.length}`);
 for (const [f, n] of residual) console.log(`  ${String(n).padStart(4)}  ${f}`);
 
-process.exit(missing.size === 0 ? 0 : 1);
+process.exit(missing.size === 0 && residual.length === 0 ? 0 : 1);

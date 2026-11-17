@@ -50,7 +50,7 @@ Trace `isLogin = f(getUser())` → `getUser = decode(storage.read(KEY))` to iden
 grep -rhoaE '.{0,60}(interceptors\.response|axios|request\.use).{0,120}' js | head
 grep -rhoaE '.{0,40}(response_code|errcode|errno|\bcode\b|\bret\b|\bstatus\b)\s*[=!]==?\s*[\-0-9]{1,4}.{0,60}' js | head -20
 # Match the original Chinese login-error strings as well as English errors.
-grep -rhoaE '.{0,40}(未登录|请重新登录|登录已过期|unauthorized|登录失效|授权|token.{0,10}invalid).{0,40}' js | head
+grep -rhoaE $'.{0,40}(\u672a\u767b\u5f55|\u8bf7\u91cd\u65b0\u767b\u5f55|\u767b\u5f55\u5df2\u8fc7\u671f|unauthorized|\u767b\u5f55\u5931\u6548|\u6388\u6743|token.{0,10}invalid).{0,40}' js | head
 grep -rhoaE '.{0,30}(location\.href|router\.(push|replace)|navigate)\([^)]*login[^)]*\)' js | head
 ```
 

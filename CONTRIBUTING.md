@@ -32,7 +32,7 @@ The database schema is created/migrated idempotently on each start — edit `db/
 ### Conventions
 
 - After frontend changes, re-run the build steps above (static export → embed → rebuild binary).
-- After i18n changes, run `node scripts/check-i18n-keys.mjs` to reconcile the trilingual keys.
+- After i18n changes, run `node scripts/check-i18n-keys.mjs` to verify English translation keys.
 - Keep commit messages concise and explain the motivation.
 
 ### Workflow

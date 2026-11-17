@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	_ "image/gif" // 注册 gif 解码器
+	_ "image/gif" // Register GIF decoder.
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -19,65 +19,65 @@ import (
 	"antifox/report"
 )
 
-// 漏洞证据截图上传/展示/管理。文件存 dataDir/report_assets/evidence/<node_id>/（随 report_assets 备份）；
-// 发现页 <img> 经 /api/findings/{id}/evidence/{file} 取图（cookie 鉴权，同 logo）；报告/MD 侧按磁盘路径内嵌。
+// Finding evidence upload/display/management. Files live under report_assets/evidence/<node_id>/.
+// Findings use the cookie-authenticated evidence endpoint; reports embed files from disk.
 //
-// 安全基线（本身是安全平台，上传点不能成为恶意文件入口）：
-//   - 不信任扩展名/客户端 MIME：按内容判定类型 + 解码校验是真图片 + 重编码（剥离追加/内嵌载荷、
-//     EXIF、polyglot），统一落盘为干净 png/jpg；
-//   - 解压炸弹防护：先读 DecodeConfig 校验尺寸上限再整幅解码；
-//   - 取图响应强制 X-Content-Type-Options: nosniff + 固定图片 Content-Type + inline，杜绝存储型 XSS。
+// Upload security requirements:
+// Validate content and decode actual images instead of trusting extension/client MIME;
+// re-encode as clean PNG/JPEG to strip appended payloads, EXIF, and polyglot content.
+// Check DecodeConfig dimensions before decoding to prevent decompression bombs.
+// Serve fixed image Content-Type with nosniff and inline disposition to prevent stored XSS.
 
 const (
-	evidenceMaxBytes  = 16 << 20   // 单图 16MB
-	evidenceMaxPixels = 50_000_000 // 5000 万像素上限（防解压炸弹）
+	evidenceMaxBytes  = 16 << 20   // 16 MB per image.
+	evidenceMaxPixels = 50_000_000 // 50 million pixels; decompression-bomb limit.
 	evidenceMaxDim    = 20000
 )
 
-// sanitizeImage 按内容校验并重编码图片；仅接受 png/jpeg/gif，统一输出 png（或 jpg）。
+// sanitizeImage validates PNG/JPEG/GIF content and re-encodes as PNG or JPEG.
 func sanitizeImage(raw []byte) (out []byte, ext string, err error) {
 	ct := http.DetectContentType(raw)
 	switch ct {
 	case "image/png", "image/jpeg", "image/gif":
 	default:
-		return nil, "", fmt.Errorf("仅支持 png/jpg/gif 图片（检测到 %s）", ct)
+		return nil, "", fmt.Errorf("only PNG/JPEG/GIF images are supported (detected %s)", ct)
 	}
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(raw))
 	if err != nil {
-		return nil, "", fmt.Errorf("不是有效图片")
+		return nil, "", fmt.Errorf("invalid image")
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > evidenceMaxDim || cfg.Height > evidenceMaxDim ||
 		cfg.Width*cfg.Height > evidenceMaxPixels {
-		return nil, "", fmt.Errorf("图片尺寸超限")
+		return nil, "", fmt.Errorf("image dimensions exceed the limit")
 	}
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return nil, "", fmt.Errorf("图片解码失败")
+		return nil, "", fmt.Errorf("image decoding failed")
 	}
 	var buf bytes.Buffer
 	if ct == "image/jpeg" {
 		if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
-			return nil, "", fmt.Errorf("图片处理失败")
+			return nil, "", fmt.Errorf("image processing failed")
 		}
 		return buf.Bytes(), ".jpg", nil
 	}
 	if err := png.Encode(&buf, img); err != nil {
-		return nil, "", fmt.Errorf("图片处理失败")
+		return nil, "", fmt.Errorf("image processing failed")
 	}
 	return buf.Bytes(), ".png", nil
 }
 
-// evidenceDir 返回某漏洞证据文件目录（绝对路径）。
+// evidenceDir returns the absolute directory for a finding's evidence files.
 func (s *Server) evidenceDir(nodeID int64) string {
 	return filepath.Join(s.dataDir, "report_assets", "evidence", strconv.FormatInt(nodeID, 10))
 }
 
-// evidenceURL 构造前端取图 URL。
+// evidenceURL constructs the frontend image URL.
 func evidenceURL(nodeID int64, filename string) string {
 	return fmt.Sprintf("/api/findings/%d/evidence/%s", nodeID, filename)
 }
 
-// POST /api/findings/{id}/evidence — multipart "file" + 可选 caption / step_index。
+// POST /api/findings/{id}/evidence: multipart file with optional caption/step_index.
 func (s *Server) uploadFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -85,27 +85,27 @@ func (s *Server) uploadFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeID, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "无效的漏洞 id")
+		writeErr(w, 400, "Invalid finding ID")
 		return
 	}
 	if err := r.ParseMultipartForm(16 << 20); err != nil { // 16 MB
-		writeErr(w, 400, "上传解析失败")
+		writeErr(w, 400, "Failed to parse upload")
 		return
 	}
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		writeErr(w, 400, "缺少文件")
+		writeErr(w, 400, "Missing file")
 		return
 	}
 	defer file.Close()
-	// 读入内存(限 16MB)→内容级校验+重编码，不信任扩展名/客户端 MIME。
+	// Read up to 16 MB, validate content, and re-encode; do not trust extension/client MIME.
 	raw, err := io.ReadAll(io.LimitReader(file, evidenceMaxBytes+1))
 	if err != nil {
-		writeErr(w, 400, "读取文件失败")
+		writeErr(w, 400, "Failed to read file")
 		return
 	}
 	if len(raw) > evidenceMaxBytes {
-		writeErr(w, 400, "图片过大（上限 16MB）")
+		writeErr(w, 400, "Image exceeds the 16 MB limit")
 		return
 	}
 	clean, ext, err := sanitizeImage(raw)
@@ -115,32 +115,32 @@ func (s *Server) uploadFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	dir := s.evidenceDir(nodeID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		writeErr(w, 500, "创建目录失败")
+		writeErr(w, 500, "Failed to create directory")
 		return
 	}
 	name := fmt.Sprintf("ev-%d%s", time.Now().UnixNano(), ext)
 	if err := os.WriteFile(filepath.Join(dir, name), clean, 0o644); err != nil {
-		writeErr(w, 500, "写入失败")
+		writeErr(w, 500, "Write failed")
 		return
 	}
 	caption := strings.TrimSpace(r.FormValue("caption"))
 	stepIndex, _ := strconv.Atoi(r.FormValue("step_index"))
 	if caption == "" {
-		// 图注自动填充：没手填就用 agent 就地记录的该步复现文案派生一句（可编辑、无额外 LLM 调用）。
+		// Derive editable default captions from agent-recorded reproduction steps without another LLM call.
 		caption = s.deriveEvidenceCaption(nodeID, stepIndex)
 	}
 	ev, err := pg.CreateFindingEvidence(nodeID, name, caption, stepIndex)
 	if err != nil {
-		_ = os.Remove(filepath.Join(dir, name)) // 回滚落盘
-		writeErr(w, 500, "保存失败: "+err.Error())
+		_ = os.Remove(filepath.Join(dir, name)) // Roll back the file write.
+		writeErr(w, 500, "Save failed: "+err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"evidence": ev, "url": evidenceURL(nodeID, name)})
 }
 
 // deriveEvidenceCaption builds a default figure caption for an evidence shot from the
-// agent-written reproduction step it belongs to（步骤N：该步证明了什么）——图注即由 agent
-// 已记录的复现文案自动生成，不额外调 LLM，仍可人工编辑。step 0（概览）或该漏洞无此步时返回 ""。
+// The caption derives from the recorded step and what it proves, without another LLM call.
+// It remains editable; step 0 (overview) or missing steps return an empty string.
 func (s *Server) deriveEvidenceCaption(nodeID int64, stepIndex int) string {
 	if stepIndex <= 0 || s.m == nil || s.m.pg == nil {
 		return ""
@@ -161,11 +161,11 @@ func (s *Server) deriveEvidenceCaption(nodeID int64, stepIndex int) string {
 	if text == "" {
 		return ""
 	}
-	text = strings.SplitN(text, "\n", 2)[0] // 收敛到一行，适合缩略图下的图注
-	return clipUTF8(fmt.Sprintf("步骤%d：%s", stepIndex, text), 120)
+	text = strings.SplitN(text, "\n", 2)[0] // Single-line thumbnail caption.
+	return clipUTF8(fmt.Sprintf("Step %d: %s", stepIndex, text), 120)
 }
 
-// GET /api/findings/{id}/evidence — 列出某漏洞全部证据（带取图 url）。
+// GET /api/findings/{id}/evidence lists evidence with image URLs.
 func (s *Server) listFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -173,12 +173,12 @@ func (s *Server) listFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	nodeID, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "无效的漏洞 id")
+		writeErr(w, 400, "Invalid finding ID")
 		return
 	}
 	list, err := pg.ListFindingEvidence(nodeID)
 	if err != nil {
-		writeErr(w, 500, "获取失败")
+		writeErr(w, 500, "Retrieval failed")
 		return
 	}
 	out := make([]map[string]any, 0, len(list))
@@ -188,7 +188,7 @@ func (s *Server) listFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": out})
 }
 
-// PATCH /api/findings/{id}/evidence/{eid} — 改图注 / 对应步骤 / 排序。
+// PATCH /api/findings/{id}/evidence/{eid} updates caption/step/order.
 func (s *Server) updateFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -196,7 +196,7 @@ func (s *Server) updateFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	eid, ok := pathInt(r, "eid")
 	if !ok {
-		writeErr(w, 400, "无效的证据 id")
+		writeErr(w, 400, "Invalid evidence ID")
 		return
 	}
 	var req struct {
@@ -205,17 +205,17 @@ func (s *Server) updateFindingEvidence(w http.ResponseWriter, r *http.Request) {
 		SortOrder int    `json:"sort_order"`
 	}
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, "请求格式错误")
+		writeErr(w, 400, "Invalid request format")
 		return
 	}
 	if err := pg.UpdateFindingEvidence(eid, req.Caption, req.StepIndex, req.SortOrder); err != nil {
-		writeErr(w, 500, "保存失败: "+err.Error())
+		writeErr(w, 500, "Save failed: "+err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// DELETE /api/findings/{id}/evidence/{eid} — 删记录 + 盘文件。
+// DELETE /api/findings/{id}/evidence/{eid} removes metadata and file.
 func (s *Server) deleteFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	pg := s.pg(w)
 	if pg == nil {
@@ -223,31 +223,31 @@ func (s *Server) deleteFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	eid, ok := pathInt(r, "eid")
 	if !ok {
-		writeErr(w, 400, "无效的证据 id")
+		writeErr(w, 400, "Invalid evidence ID")
 		return
 	}
 	ev, err := pg.GetFindingEvidence(eid)
 	if err != nil {
-		writeErr(w, 404, "证据不存在")
+		writeErr(w, 404, "Evidence not found")
 		return
 	}
 	if err := pg.DeleteFindingEvidence(eid); err != nil {
-		writeErr(w, 500, "删除失败: "+err.Error())
+		writeErr(w, 500, "Deletion failed: "+err.Error())
 		return
 	}
 	_ = os.Remove(filepath.Join(s.evidenceDir(ev.NodeID), filepath.Base(ev.Filename)))
 	writeJSON(w, 200, map[string]any{"deleted": eid})
 }
 
-// GET /api/findings/{id}/evidence/{file} — 取证据图（base name，防穿越；cookie 鉴权同 logo）。
+// GET evidence by base filename prevents traversal and uses cookie authentication.
 func (s *Server) serveFindingEvidence(w http.ResponseWriter, r *http.Request) {
 	nodeID, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "无效的漏洞 id")
+		writeErr(w, 400, "Invalid finding ID")
 		return
 	}
 	file := filepath.Base(r.PathValue("file"))
-	// 固定图片 Content-Type + 禁嗅探 + 内联：即使磁盘上文件被篡改，浏览器也不会当作 HTML/脚本执行。
+	// Fixed image Content-Type, nosniff, and inline disposition prevent HTML/script interpretation.
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	switch strings.ToLower(filepath.Ext(file)) {
 	case ".png":

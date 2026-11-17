@@ -34,11 +34,11 @@ Thumbs.db
 # claude code local state
 .claude/
 
-# 内嵌前端的单二进制产物
+# Single binary with embedded frontend
 /antifox
 /server/webui/dist/
 
-# Docker 部署生成的本地环境（含密码/密钥，不提交）
+# Local Docker environment containing passwords/keys; do not commit.
 .env
 
 # build artifacts / local
@@ -50,5 +50,5 @@ Thumbs.db
 config.json
 server/skillsdist/
 
-# claude 会话导出（临时，不提交）
+# Temporary Claude session exports; do not commit.
 *-this-session-is-being-continued-*.txt

@@ -17,12 +17,12 @@ import (
 	"sync"
 	"time"
 
+	"antifox/agent"
+	"antifox/db"
 	"antifox/engine/llm"
 	"antifox/engine/memory"
 	actool "antifox/engine/tool"
 	"antifox/engine/transcript"
-	"antifox/agent"
-	"antifox/db"
 	"antifox/llmpool"
 	"antifox/report"
 	"antifox/traffic"
@@ -39,14 +39,14 @@ type Server struct {
 	dataDir  string // data root; report .docx files are written under dataDir/reports
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
 
-	loginLimiter *loginLimiter // 登录失败限流/锁定（按 IP + 账号）
+	loginLimiter *loginLimiter // Login failure limits/lockouts by IP and account.
 
 	// reportJobs tracks async .docx report generation per task (in-memory; reports
 	// are regenerable so a restart simply drops job state). Guarded by reportMu.
 	reportMu   sync.Mutex
 	reportJobs map[string]*reportJob
 
-	// enrichJobs tracks async per-finding AI enrichment (「AI 分析」), keyed by
+	// enrichJobs tracks asynchronous per-finding AI analysis, keyed by
 	// exploration node id. Enrichment can be a multi-minute LLM generation for stored
 	// findings; running it as a background job (on s.ctx, not the request ctx) means a
 	// page switch / disconnect can't abort it, re-clicks dedup to the same job, and the
@@ -137,16 +137,16 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		enrichJobs: map[int64]*enrichJob{}, provCache: map[int64]llm.Provider{}}
 	s.loginLimiter = newLoginLimiter()
 	s.llmHealth = newLLMHealthRegistry(m.pg) // process-wide LLM circuit breaker (restores cooling windows)
-	// 多用户 RBAC：首启迁移旧单用户密码为内置 admin + 播种角色/权限（幂等）。
+	// Idempotent RBAC bootstrap migrates the legacy password and seeds roles/permissions.
 	s.bootstrapRBAC()
-	// 内置 skill 库：把 embed 进二进制的默认 skill 物化到 skillDir（仅缺失时写）。
-	// 单二进制自包含，云/客户现场部署首启即有全套 skill，不依赖 dev 机文件。
+	// Materialize embedded default skills into skillDir only when missing.
+	// The single binary includes all skills for fresh deployments without development files.
 	materializeEmbeddedSkills(skillDir)
-	// 报告生成 skill：把内置骨架/prompt 落成可编辑文件（仅缺失时写，不覆盖用户编辑）。
+	// Materialize editable report skeletons/prompts without overwriting user changes.
 	if err := report.SeedSkillFiles(skillDir); err != nil {
 		log.Printf("[report] seed skill files: %v", err)
 	}
-	s.seedDemoReportTemplate() // 首启预置一个演示模版（marker 文件保证仅一次）
+	s.seedDemoReportTemplate() // Seed one example template, guarded by a marker.
 	// per-task LLM: a task pinned to a specific profile runs on that profile's
 	// dedicated planner/worker; unpinned tasks fall back to the global active pair.
 	s.engine.SetAgentResolver(func(t *Task) (*agent.Planner, *agent.Worker) {
@@ -155,7 +155,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		}
 		return s.agentsForProfile(*t.LLMProfileID)
 	})
-	// Wire DB-stored prompt templates into the agents (新版方案 §3.3 / §5a). With no
+	// Wire DB-stored templates into agents. With no
 	// override row, agents keep their built-in defaults — behavior is unchanged.
 	if m.pg != nil {
 		agent.PromptOverride = func(key string) (string, bool) {
@@ -200,13 +200,13 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 			}
 			return a.TaskTimeoutWrapupMaxTurns, true
 		}
-		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
+		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // Assemble visible skills/MCP and host tools.
 		domainReg := buildDomainReg(m.Assets())
-		wireTools(m.pg, domainReg)                      // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
-		seedPrompts(m.pg)                               // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedOrchestrationTools()                      // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
-		s.seedPythonInterpreter()                       // 自定义脚本工具:开机检测 python 解释器入库(仅空时)
-		go newScheduler(s).Run(s.ctx)                   // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
+		wireTools(m.pg, domainReg)    // Filter built-ins by agent and inject DB prose/defaults.
+		seedPrompts(m.pg)             // Seed default bodies only when absent.
+		s.seedOrchestrationTools()    // Seed cross-task tools with configurable bindings.
+		s.seedPythonInterpreter()     // Detect Python at startup only when unconfigured.
+		go newScheduler(s).Run(s.ctx) // Time/finding/goal triggers for custom agents.
 		// Fill the tool cache for any enabled MCP that has none yet (notably the
 		// seeded browser MCP on first run). Async so it never blocks startup.
 		go s.discoverEmptyMCPsOnStartup()
@@ -234,13 +234,13 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string) *Serv
 		// clear stale 'running' intents from a prior crash/restart (no live worker
 		// owns them) so they re-claim instead of spinning forever in the UI.
 		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
-			log.Printf("[engine] task %s 重置 %d 个残留 running 意图为 open", t.ID, n)
+			log.Printf("[engine] Task %s reset %d leftover running intents to open", t.ID, n)
 		}
 		if t.Paused {
 			s.engine.Pause(t.ID)
 		}
-		// 任务级超时:为每个未终态、带 timeout 的任务起 deadline 协调器,独立于 planner/worker
-		// loop——非活跃任务重启后也能在到点后被收尾(deadline 已过则立即走收尾时序)。
+		// Start independent deadline coordinators for nonterminal timed tasks, so inactive tasks
+		// also settle after restart; expired deadlines enter settlement immediately.
 		if !isTerminalStatus(t.Status) {
 			s.engine.startDeadlineCoordinator(ctx, t)
 		}
@@ -352,7 +352,7 @@ func (s *Server) webSearchFor(key string) agent.WebSearchOpts {
 // global apply path (applyLLM) and the per-profile path (agentsForProfile), so a task
 // pinned to a specific profile behaves identically to the active one — just a different LLM.
 // roleProvider resolves the provider + config a role runs on: its bound LLM profile
-// (agents.llm_profile_id) if set — enabling planner-strong / worker-weak 分级 — else the
+// (agents.llm_profile_id) when set, enabling different planner/worker model tiers; otherwise
 // passed global fallback (already pool-wrapped). A bound profile ALSO fails over via
 // poolForBinding, so binding a role never removes its failover safety net.
 func (s *Server) roleProvider(role string, fbProv llm.Provider, fbCfg agent.Config) (llm.Provider, agent.Config) {
@@ -372,8 +372,8 @@ func (s *Server) roleProvider(role string, fbProv llm.Provider, fbCfg agent.Conf
 
 func (s *Server) buildPlannerWorker(prov llm.Provider, cfg agent.Config) (*agent.Planner, *agent.Worker) {
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts")) // raw LLM conversation logs
-	// per-role LLM 分级: planner/worker each run on their bound profile if set (planner
-	// 强 / worker 弱, for cost control), else the passed global active provider. Unbound
+	// Per-role profiles let planner/worker use independently selected models for cost control;
+	// otherwise they use the passed global active provider. Unbound
 	// roles inherit prov/cfg exactly, so the default (no bindings) is byte-for-byte the
 	// old single-provider behavior.
 	wkProv, wkCfg := s.roleProvider("worker", prov, cfg)
@@ -402,7 +402,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 		return err
 	}
 	// Wrap the globally-active provider in the failover chain (no-op when the pool is
-	// off or has <2 usable members), so a 402/额度耗尽/坏网络 on the active profile
+	// off or has fewer than two usable members), so quota exhaustion or network failure
 	// fails over to the next configured profile instead of stalling every agent.
 	// planner/worker/mainAgent/chatAgent all get the pooled provider below.
 	if s.m != nil && s.m.pg != nil {
@@ -415,13 +415,13 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	win := cfg.CompactionWindow()
-	maProv, maCfg := s.roleProvider("mainagent", prov, cfg) // 主 Agent 可绑独立模型(角色分工)
+	maProv, maCfg := s.roleProvider("mainagent", prov, cfg) // Main agent may bind an independent model.
 	s.cfgMu.Lock()
 	s.mainAgent = agent.NewMainAgent(maProv, maCfg.Model, s.m.dir, tx, maCfg.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	s.mainAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert()) // WebFetch through the recording proxy
 	s.mainAgent.SetWebSearch(s.webSearchFor("mainagent"))
 	// chat agent serves MANY custom agents by key → it holds the GLOBAL opts
-	// (backend/key) and gates Enabled per-conversation-agent at Chat time. 对话始终用激活配置。
+	// (backend/key) and gates Enabled per conversation agent at Chat time. Chat uses the active profile.
 	s.chatAgent = agent.NewChatAgent(prov, cfg.Model, s.m.dir, tx, win) // chat page runner
 	s.chatAgent.SetProxy(s.m.ProxyAddr(), s.m.ProxyCACert())
 	s.chatAgent.SetWebSearch(s.m.WebSearchOpts())
@@ -564,7 +564,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/login", s.authLogin)
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
-	// 平台权限（多用户 RBAC）
+	// Multi-user platform RBAC.
 	mux.HandleFunc("GET /api/rbac/me", s.rbacMe)
 	mux.HandleFunc("GET /api/rbac/metadata", s.rbacMetadata)
 	mux.HandleFunc("GET /api/rbac/users", s.rbacListUsers)
@@ -576,7 +576,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/rbac/roles/{id}", s.rbacUpdateRole)
 	mux.HandleFunc("DELETE /api/rbac/roles/{id}", s.rbacDeleteRole)
 
-	// 审计日志
+	// Audit logs.
 	mux.HandleFunc("GET /api/audit/logs", s.auditLogs)
 
 	mux.HandleFunc("GET /api/health", s.health)
@@ -585,8 +585,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
 	mux.HandleFunc("GET /api/logs/stream", s.streamLogs)
 
-	// 一键更新（从 GitHub Release 拉新版、校验、暂存，重启交给守护脚本/systemd 完成换装）。
-	// apply/rollback 是高危操作，RBAC 收归 admin（见 rbac_enforce.go 的管理员专属前缀表）。
+	// Download, verify, and stage GitHub releases; supervisor/systemd completes replacement on restart.
+	// apply/rollback are admin-only through rbac_enforce.go.
 	mux.HandleFunc("GET /api/update/check", s.updateCheck)
 	mux.HandleFunc("POST /api/update/apply", s.updateApply)
 	mux.HandleFunc("POST /api/update/rollback", s.updateRollback)
@@ -641,7 +641,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/report/generate", s.generateReport)
 	mux.HandleFunc("GET /api/report/status", s.reportStatus)
 	mux.HandleFunc("GET /api/report/download", s.downloadReport)
-	// 报告管理：设置(公司/logo/测试人员/CVSS) + logo 上传/预览 + 已生成报告清单
+	// Report management: issuer/logo/personnel/CVSS settings, logo assets, and generated inventory.
 	mux.HandleFunc("GET /api/report-settings", s.getReportSettings)
 	mux.HandleFunc("PUT /api/report-settings", s.putReportSettings)
 	mux.HandleFunc("POST /api/report-assets/logo", s.uploadReportLogo)
@@ -653,7 +653,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/report-templates", s.createReportTemplate)
 	mux.HandleFunc("PUT /api/report-templates/{id}", s.updateReportTemplate)
 	mux.HandleFunc("DELETE /api/report-templates/{id}", s.deleteReportTemplate)
-	// 知识库（两层 RAG：全局 + 任务）。字面段路由比 /{id} 通配更具体，Go 1.22 mux 按具体度择优，不冲突。
+	// Global/task knowledge retrieval. Go 1.22 prioritizes literal routes over /{id} wildcards.
 	mux.HandleFunc("GET /api/knowledge", s.listKnowledge)
 	mux.HandleFunc("POST /api/knowledge", s.createKnowledge)
 	mux.HandleFunc("POST /api/knowledge/upload", s.uploadKnowledge)
@@ -667,27 +667,27 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/knowledge/{id}", s.getKnowledge)
 	mux.HandleFunc("PUT /api/knowledge/{id}", s.updateKnowledge)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", s.deleteKnowledge)
-	// 漏洞补录：从任务会话转录提取漏洞，补建 finding 节点（探索图/发现页/报告同时补齐）
+	// Extract findings from transcripts into shared graph/findings/report nodes.
 	mux.HandleFunc("POST /api/tasks/{id}/extract-findings", s.extractFindings)
-	// 漏洞富化（管理层覆盖，键为探索节点 id）
+	// Finding enrichment overlays keyed by exploration node ID.
 	mux.HandleFunc("GET /api/findings/{id}", s.findingDetail)
 	mux.HandleFunc("POST /api/findings/{id}/enrich", s.findingEnrich)
 	mux.HandleFunc("GET /api/findings/{id}/enrich/status", s.findingEnrichStatus)
 	mux.HandleFunc("PUT /api/findings/{id}", s.findingUpdate)
-	// 漏洞证据截图（发现页/报告/MD 共用）
+	// Evidence screenshots shared by findings/reports/Markdown.
 	mux.HandleFunc("POST /api/findings/{id}/evidence", s.uploadFindingEvidence)
 	mux.HandleFunc("GET /api/findings/{id}/evidence", s.listFindingEvidence)
 	mux.HandleFunc("GET /api/findings/{id}/evidence/{file}", s.serveFindingEvidence)
 	mux.HandleFunc("PUT /api/findings/{id}/evidence/{eid}", s.updateFindingEvidence)
 	mux.HandleFunc("DELETE /api/findings/{id}/evidence/{eid}", s.deleteFindingEvidence)
-	// 漏洞↔流量关联（手动；引擎自动记录复用 db.LinkFindingTraffic）
+	// Manual finding/traffic links; engine links reuse db.LinkFindingTraffic.
 	mux.HandleFunc("POST /api/findings/{id}/traffic", s.linkFindingTraffic)
 	mux.HandleFunc("GET /api/findings/{id}/traffic", s.listFindingTraffic)
 	mux.HandleFunc("DELETE /api/findings/{id}/traffic/{eid}", s.unlinkFindingTraffic)
 	mux.HandleFunc("POST /api/chat", s.chat)
 	mux.HandleFunc("POST /api/tasks/{id}/chat/stop", s.stopChat)
 
-	// --- 管理后台 API (PostgreSQL 数据源; 新版数据库与管理后台方案) ---
+	// --- Administration API backed by PostgreSQL ---
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.pgDeleteTask)
 	// Agents
 	// conversations (chat page)
@@ -722,7 +722,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/agents/{key}/prompt/preview", s.pgPreviewPrompt)
 	mux.HandleFunc("GET /api/agents/{key}/visibility", s.pgGetAgentVisibility)
 	mux.HandleFunc("PUT /api/agents/{key}/visibility", s.pgSetAgentVisibility)
-	// 内置工具目录（描述/参数默认值可改、按 agent 绑定；key 与 handler 在代码层）
+	// Built-in tools: editable descriptions/defaults and agent bindings; keys/handlers remain code-owned.
 	mux.HandleFunc("GET /api/tools", s.pgListTools)
 	mux.HandleFunc("PUT /api/tools/{key}", s.pgUpdateTool)
 	mux.HandleFunc("POST /api/tools/custom", s.pgCreateCustomTool)
@@ -739,13 +739,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mcp/{id}/tools", s.pgMCPTools)
 	mux.HandleFunc("POST /api/mcp/{id}/health", s.healthCheckMCP)
 	mux.HandleFunc("POST /api/mcp/{id}/refresh", s.pgRefreshMCP)
-	// 资产同步 — ScopeSentry 数据源
+	// ScopeSentry asset synchronization.
 	mux.HandleFunc("GET /api/sync/scopesentry/status", s.syncSSStatus)
 	mux.HandleFunc("POST /api/sync/scopesentry/datasource", s.syncSSDatasource)
 	mux.HandleFunc("GET /api/sync/scopesentry/projects", s.syncSSProjects)
 	mux.HandleFunc("GET /api/sync/scopesentry/tasks", s.syncSSTasks)
 	mux.HandleFunc("POST /api/sync/scopesentry/sync", s.syncSSRun)
-	// Skill CRUD (文件系统)
+	// Filesystem-based skill CRUD.
 	mux.HandleFunc("GET /api/skills", s.fsListSkills)
 	mux.HandleFunc("GET /api/skills/stats", s.fsSkillStats)
 	mux.HandleFunc("POST /api/skills", s.fsCreateSkill)
@@ -758,27 +758,27 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills/{name}/files/{file...}", s.fsReadFile)
 	mux.HandleFunc("PUT /api/skills/{name}/files/{file...}", s.fsWriteFile)
 	mux.HandleFunc("DELETE /api/skills/{name}/files/{file...}", s.fsDeletePath)
-	// MCP 资源侧可见性（更具体的 skill 路由会优先匹配）
+	// MCP resource visibility; more specific skill routes take precedence.
 	mux.HandleFunc("GET /api/visibility/{kind}/{id}", s.pgResourceVisibility)
 	mux.HandleFunc("POST /api/visibility/toggle", s.pgToggleVisibility)
-	// Skill 可见性（按名称，更具体，优先于上面的通配路由）
+	// Skill visibility by name, more specific than the wildcard route above.
 	mux.HandleFunc("GET /api/visibility/skill/{name}", s.pgSkillVisibility)
 	mux.HandleFunc("POST /api/visibility/skill/toggle", s.pgToggleSkillVisibility)
-	// LLM 多 profile
+	// Multiple LLM profiles.
 	mux.HandleFunc("GET /api/llm/profiles", s.pgListProfiles)
 	mux.HandleFunc("POST /api/llm/profiles", s.pgSaveProfile)
 	mux.HandleFunc("DELETE /api/llm/profiles/{id}", s.pgDeleteProfile)
 	mux.HandleFunc("POST /api/llm/profiles/active", s.pgActivateProfile)
-	// LLM 轮询(故障转移)
+	// LLM failover.
 	mux.HandleFunc("GET /api/llm/pool", s.pgLLMPoolStatus)
 	mux.HandleFunc("POST /api/llm/pool", s.pgSetLLMPool)
 	mux.HandleFunc("POST /api/llm/pool/reset", s.pgResetLLMPool)
 	mux.HandleFunc("POST /api/llm/profiles/{id}/pool", s.pgSetProfilePool)
-	// LLM 角色分工（各角色映射到某配置）
+	// LLM role assignments map roles to profiles.
 	mux.HandleFunc("GET /api/llm/roles", s.pgLLMRoles)
 	mux.HandleFunc("POST /api/llm/roles", s.pgSetLLMRole)
 
-	// 拦截规则管理
+	// Interception-rule management.
 	mux.HandleFunc("GET /api/intercept/rules", s.interceptListRules)
 	mux.HandleFunc("POST /api/intercept/rules", s.interceptCreateRule)
 	mux.HandleFunc("PUT /api/intercept/rules/{id}", s.interceptUpdateRule)
@@ -896,14 +896,14 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		active = t.ID
 	}
 	list := s.m.List()
-	toks, _ := s.m.PG().TokenTotalsAll()     // whole-task token totals, one query for all tasks
-	lastAct, _ := s.m.PG().LastActivityAll() // persisted last-activity per task, one query
+	toks, _ := s.m.PG().TokenTotalsAll()      // whole-task token totals, one query for all tasks
+	lastAct, _ := s.m.PG().LastActivityAll()  // persisted last-activity per task, one query
 	goalCounts, _ := s.m.PG().GoalCountsAll() // goal progress per exploration, one query
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
 		status := "created"
 		switch {
-		case isTerminalStatus(t.Status): // 持久化终态优先（done/failed/timeout）
+		case isTerminalStatus(t.Status): // Persisted done/failed/timeout takes precedence.
 			status = t.Status
 		case t.Paused || s.engine.IsPaused(t.ID):
 			status = "paused"
@@ -955,9 +955,9 @@ type editTaskReq struct {
 	Egress         string `json:"egress"`
 }
 
-// editTask edits a task's fields in place (免删重建). name/timeout/LLM take effect
+// editTask updates fields in place. name/timeout/LLM take effect
 // immediately; a changed goal/description steers subsequent planning (no auto
-// re-decompose — pair with 继续运行 to act on a new goal).
+// re-decompose; resume the task to act on a new goal).
 func (s *Server) editTask(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.m.Task(r.PathValue("id"))
 	if !ok {
@@ -970,12 +970,12 @@ func (s *Server) editTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(req.Description) == "" {
-		writeErr(w, 400, "描述不能为空")
+		writeErr(w, 400, "Description must not be empty")
 		return
 	}
 	if req.LLMProfileID != nil {
 		if _, ok := s.loadProfileConfig(*req.LLMProfileID); !ok {
-			writeErr(w, 400, "所选 LLM 配置不存在或未设置 API Key")
+			writeErr(w, 400, "Selected LLM profile does not exist or has no API key")
 			return
 		}
 	}
@@ -983,7 +983,7 @@ func (s *Server) editTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	log.Printf("[task] #%s 已编辑", t.ID)
+	log.Printf("[task] #%s updated", t.ID)
 	writeJSON(w, 200, map[string]any{"id": t.ID, "ok": true})
 }
 
@@ -1007,13 +1007,13 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 		s.engine.Run(s.ctx, t) // ensure loops are alive, then un-pause + nudge
 		s.engine.Resume(t)
 	case "rerun":
-		// 继续运行：把停下/结束的任务重激活(重置非终态+清运行时钟)，保留探索图，续跑。
+		// Resume a stopped/finished task: clear terminal state and run clock, preserving its graph.
 		if err := s.m.ReactivateTask(t.ID); err != nil {
 			writeErr(w, 500, "reactivate: "+err.Error())
 			return
 		}
 		s.engine.Rerun(s.ctx, t)
-		log.Printf("[task] #%s 继续运行(重跑)", t.ID)
+		log.Printf("[task] #%s resumed", t.ID)
 		writeJSON(w, 200, map[string]any{"id": t.ID, "paused": false, "status": "running"})
 		return
 	default:
@@ -1025,7 +1025,7 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 	if err := s.m.SetTaskPaused(t.ID, paused); err != nil { // persist (survives restart)
 		log.Printf("[control] persist paused %s: %v", t.ID, err)
 	}
-	log.Printf("[task] #%s %s", t.ID, map[bool]string{true: "已暂停", false: "已恢复"}[paused])
+	log.Printf("[task] #%s %s", t.ID, map[bool]string{true: "paused", false: "resumed"}[paused])
 	writeJSON(w, 200, map[string]any{"id": t.ID, "paused": paused})
 }
 
@@ -1100,7 +1100,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		Proxy           string `json:"proxy"`
 		APIKey          string `json:"api_key"`
 		ReasoningEffort string `json:"reasoning_effort"`
-		ProfileID       *int64 `json:"profile_id"` // 测已存 profile 时传入：api_key 为空则用它存的 key
+		ProfileID       *int64 `json:"profile_id"` // For saved profiles, empty api_key uses the stored secret.
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1110,8 +1110,8 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ReasoningEffort = req.ReasoningEffort
-	// API Key 解析优先级：表单输入 > 指定 profile 存的 key > 全局配置的 key。
-	// 已存 profile 的 key 不回传浏览器，所以测试已存配置时表单为空，需从 DB 取。
+	// API key precedence: form input, selected profile's stored key, then global key.
+	// Stored keys are never returned to the browser, so profile tests retrieve them from the DB.
 	if cfg.APIKey == "" && req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
 			cfg.APIKey = p.APIKey
@@ -1123,7 +1123,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "未提供 API Key"})
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "No API key provided"})
 		return
 	}
 	lat, err := agent.TestConnection(r.Context(), cfg)
@@ -1135,12 +1135,12 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 }
 
 type createTaskReq struct {
-	Name           string `json:"name"` // 简短任务名/目标(可选)
+	Name           string `json:"name"` // Optional short task name.
 	Description    string `json:"description"`
 	Goal           string `json:"goal"`
-	LLMProfileID   *int64 `json:"llm_profile_id,omitempty"` // 指定运行本任务的 LLM 配置;省略/null=用激活配置
-	TimeoutSeconds int    `json:"timeout_seconds"`          // 任务级超时(秒);0/省略=不限时
-	Egress         string `json:"egress"`                   // 出口代理:''=跟随全局|'direct'=直连|'proxy'=走全局代理
+	LLMProfileID   *int64 `json:"llm_profile_id,omitempty"` // Task profile; omitted/null uses active profile.
+	TimeoutSeconds int    `json:"timeout_seconds"`          // Task timeout seconds; 0/omitted=unlimited.
+	Egress         string `json:"egress"`                   // ''=global; 'direct'=direct; 'proxy'=global proxy.
 }
 
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
@@ -1150,13 +1150,13 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.TrimSpace(req.Description) == "" {
-		req.Description = "未命名任务"
+		req.Description = "Untitled task"
 	}
 	// validate the pinned profile up front (must exist + be usable), so a bad id fails
 	// task creation instead of silently falling back to the active profile at run time.
 	if req.LLMProfileID != nil {
 		if _, ok := s.loadProfileConfig(*req.LLMProfileID); !ok {
-			writeErr(w, 400, "所选 LLM 配置不存在或未设置 API Key")
+			writeErr(w, 400, "Selected LLM profile does not exist or has no API key")
 			return
 		}
 	}
@@ -1168,7 +1168,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	log.Printf("[task] 新建任务 #%s «%s» 目标: %s", t.ID, req.Description, req.Goal)
+	log.Printf("[task] Created #%s «%s», objective: %s", t.ID, req.Description, req.Goal)
 	// seed initial asset(s) from goal/description so the event-driven loop has a root.
 	s.seed(t, req.Description+" "+req.Goal)
 	// Return immediately — goal decomposition is async so the UI isn't blocked.
@@ -1178,7 +1178,7 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	// fires before any goal nodes exist.
 	go func() {
 		s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-			Summary: "第 0 轮目标拆解"})
+			Summary: "Round 0: goal decomposition"})
 		goals := s.createGoals(s.ctx, t, func(r db.Activity) {
 			s.engine.emitActivity(t, r)
 		})
@@ -1263,13 +1263,13 @@ func (s *Server) llmHost() string {
 func (s *Server) seed(t *Task, text string) {
 	scheme, host, port, ok := parseTarget(text)
 	if !ok {
-		log.Printf("[seed] task %s: 未能从 %q 解析出目标 host/IP，不创建站点（请手动配置 scope）", t.ID, text)
+		log.Printf("[seed] Task %s: no target host/IP parsed from %q; configure scope manually", t.ID, text)
 		t.Notify()
 		return
 	}
 	// P0-1 guard: never treat the configured LLM gateway as a target.
 	if gw := s.llmHost(); gw != "" && host == gw {
-		log.Printf("[seed] task %s: 目标 %q 是 LLM 网关，拒绝作为渗透目标", t.ID, host)
+		log.Printf("[seed] Task %s: %q is an LLM gateway and cannot be a test target", t.ID, host)
 		t.Notify()
 		return
 	}
@@ -1295,7 +1295,7 @@ func (s *Server) seed(t *Task, text string) {
 			_ = t.Store.Anchor(begin, rootID)
 		}
 	}
-	log.Printf("[seed] task %s: 目标站点 %s", t.ID, u)
+	log.Printf("[seed] Task %s: target site %s", t.ID, u)
 	t.Notify()
 }
 
@@ -1308,8 +1308,6 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, t)
 }
 
-
-
 func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
 	t := s.m.ResolveTask(r.URL.Query().Get("task"))
 	if t == nil {
@@ -1321,8 +1319,8 @@ func (s *Server) frontier(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
-	// 无 task 参数 → 全局「发现」页：从独立 findings 表读取（任务删除后 finding 依然保留）。
-	// 带 task 参数 → 仅该任务（任务概览/发现 Tab 用），从 exploration_nodes 读（任务在则节点在）。
+	// Without task, read standalone findings that survive task deletion for the global page.
+	// With task, read exploration_nodes for that task's overview/Findings tab.
 	taskParam := r.URL.Query().Get("task")
 	if taskParam == "" {
 		fs, _ := s.m.pg.ListFindings(500)
@@ -1609,8 +1607,8 @@ func (s *Server) streamActivity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Whole-task view (intentPtr==nil): replay the RECENT window + the full main-agent
-	// conversation, so a long task (>2000 steps) still shows 编排会话 instead of the
-	// first 2000 recon steps (which buried the conversation off-window → empty 会话).
+	// conversation, so tasks longer than 2000 steps still show the orchestration session
+	// instead of only the first reconnaissance steps that would hide the conversation.
 	// Intent-scoped view: the intent's own steps, chronological.
 	var items []db.Activity
 	var cursor int64
@@ -1669,8 +1667,7 @@ func (s *Server) activityDetail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"detail": d})
 }
 
-
-// parseTrafficFilter 从查询串解析高级筛选（路径 / 状态码桶 2xx..5xx / 响应长度区间）。
+// parseTrafficFilter parses path/status buckets/response length/body keyword filters.
 func parseTrafficFilter(q url.Values) traffic.TrafficFilter {
 	f := traffic.TrafficFilter{
 		Path:    strings.TrimSpace(q.Get("path")),
@@ -1721,13 +1718,13 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page := atoiDefault(q.Get("page"), 0)
 	size := atoiDefault(q.Get("size"), 100)
-	filter := parseTrafficFilter(q) // 高级筛选：路径 / 状态码桶 / 响应长度区间 / 正文关键词
+	filter := parseTrafficFilter(q) // Advanced path/status/length/body filters.
 	var ex []traffic.ExchangeMeta
 	var matched, count int
-	buckets := map[int]int{} // 状态码分布(2/3/4/5=2xx…)，按全量聚合(非 50 行样本)
-	// task 过滤：流量按 host 存储、无任务字段，故用「该任务的资产主机集」+【任务活动时间窗】
-	// 双重圈定。只按 host 圈会把同 host 的其它测试（如首次测试）也带进来；叠加时间窗后，
-	// 同一 host 上不同时间跑的两次测试就能干净分开（与复现步骤↔流量关联用的是同一套窗口）。
+	buckets := map[int]int{} // Status distribution over all records, not just a 50-row sample.
+	// Traffic has no task_id, so combine task asset hosts with the task activity window.
+	// Host-only filtering would mix separate tests against the same host;
+	// the time window separates them, matching reproduction-to-traffic correlation.
 	if taskID, _ := strconv.ParseInt(q.Get("task"), 10, 64); taskID > 0 {
 		hosts, _ := s.m.Assets().HostsForTask(taskID)
 		tmin, tmax := s.taskTrafficWindow(taskID)
@@ -1756,13 +1753,13 @@ func (s *Server) getTraffic(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, 200, map[string]any{
-		"enabled":       s.m.TrafficEnabled(), // reflect the capture toggle
-		"proxy":         s.m.ProxyAddr(),
-		"count":         count,   // total recorded (unfiltered)
-		"total":         matched, // rows matching the current filter (for pagination)
-		"page":          page,
-		"size":          size,
-		"exchanges":     dtos,
+		"enabled":        s.m.TrafficEnabled(), // reflect the capture toggle
+		"proxy":          s.m.ProxyAddr(),
+		"count":          count,   // total recorded (unfiltered)
+		"total":          matched, // rows matching the current filter (for pagination)
+		"page":           page,
+		"size":           size,
+		"exchanges":      dtos,
 		"status_buckets": buckets, // {2:N,3:N,4:N,5:N} — true distribution for the dashboard
 	})
 }
@@ -1821,15 +1818,15 @@ func (s *Server) settingsPayload() map[string]any {
 	on, backend, braveKey, tavilyKey, proxy := s.m.WebSearch()
 	pyStored, _, _ := s.m.pg.GetSetting(settingPythonInterp)
 	return map[string]any{
-		"traffic_capture":     s.m.TrafficEnabled(),
-		"web_search_enabled":  on,
-		"web_search_backend":  backend,
-		"brave_key_set":       strings.TrimSpace(braveKey) != "",
-		"tavily_key_set":      strings.TrimSpace(tavilyKey) != "",
-		"web_search_proxy":    proxy,                       // 独立出口代理(http/https/socks5)，空=直连
-		"global_proxy":        s.m.GlobalProxy(),           // 全局出口代理：agent 目标流量经它出网(作 MITM 上游)，空=直连
-		"python_interpreter":  strings.TrimSpace(pyStored), // 用户/自动设的值(空=用运行时检测)
-		"workers":             s.m.Workers(),               // 并发工作 agent 数(默认3)；对之后启动的任务生效
+		"traffic_capture":    s.m.TrafficEnabled(),
+		"web_search_enabled": on,
+		"web_search_backend": backend,
+		"brave_key_set":      strings.TrimSpace(braveKey) != "",
+		"tavily_key_set":     strings.TrimSpace(tavilyKey) != "",
+		"web_search_proxy":   proxy,                       // Independent outbound proxy; empty=direct.
+		"global_proxy":       s.m.GlobalProxy(),           // Target-traffic MITM upstream; empty=direct.
+		"python_interpreter": strings.TrimSpace(pyStored), // Stored selection; empty=runtime detection.
+		"workers":            s.m.Workers(),               // Worker concurrency, default 3; applies to new tasks.
 	}
 }
 
@@ -1837,7 +1834,7 @@ func (s *Server) settingsPayload() map[string]any {
 func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 	p := detectPython()
 	if p == "" {
-		writeErr(w, 404, "未检测到 python(python3/python 均不在 PATH)")
+		writeErr(w, 404, "Python not detected; neither python3 nor python is in PATH")
 		return
 	}
 	if err := s.m.pg.SetSetting(settingPythonInterp, p); err != nil {
@@ -1859,10 +1856,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		WebSearchBackend *string `json:"web_search_backend"`
 		BraveKey         *string `json:"brave_search_api_key"`
 		TavilyKey        *string `json:"tavily_search_api_key"`
-		WebSearchProxy   *string `json:"web_search_proxy"`   // 独立出口代理(http/https/socks5)；null=不改，""=清空
-		GlobalProxy      *string `json:"global_proxy"`       // 全局出口代理(http/https/socks5)；null=不改，""=清空(直连)
-		PythonInterp     *string `json:"python_interpreter"` // 自定义脚本工具的 python 解释器路径
-		Workers          *int    `json:"workers"`            // 并发工作 agent 数(>0)；对之后启动的任务生效
+		WebSearchProxy   *string `json:"web_search_proxy"`   // null=unchanged; empty=clear.
+		GlobalProxy      *string `json:"global_proxy"`       // null=unchanged; empty=direct access.
+		PythonInterp     *string `json:"python_interpreter"` // Python path for custom script tools.
+		Workers          *int    `json:"workers"`            // Positive worker concurrency for subsequently started tasks.
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1876,7 +1873,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.GlobalProxy != nil {
 		if err := s.m.SetGlobalProxy(*req.GlobalProxy); err != nil {
-			writeErr(w, 400, err.Error()) // 代理 URL/scheme 非法
+			writeErr(w, 400, err.Error()) // Invalid proxy URL/scheme.
 			return
 		}
 	}
@@ -1953,12 +1950,12 @@ func (s *Server) testGlobalProxy(w http.ResponseWriter, r *http.Request) {
 		raw = s.m.GlobalProxy()
 	}
 	if raw == "" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "未配置代理"})
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "Proxy is not configured"})
 		return
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https" && u.Scheme != "socks5") {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "代理地址非法（需 http/https/socks5）"})
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "Invalid proxy address; use http/https/socks5"})
 		return
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
@@ -1984,7 +1981,7 @@ func (s *Server) testGlobalProxy(w http.ResponseWriter, r *http.Request) {
 		}
 		ip := strings.TrimSpace(string(raw))
 		if net.ParseIP(ip) == nil {
-			lastErr = "返回非 IP 响应"
+			lastErr = "Response was not an IP address"
 			continue
 		}
 		writeJSON(w, 200, map[string]any{
@@ -1995,7 +1992,7 @@ func (s *Server) testGlobalProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if lastErr == "" {
-		lastErr = "无可用检测节点"
+		lastErr = "No available probe endpoints"
 	}
 	writeJSON(w, 200, map[string]any{"ok": false, "error": lastErr})
 }
@@ -2037,7 +2034,7 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(results) == 0 {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "搜索返回 0 条结果（可能被限流或代理不通）", "backend": backend})
+		writeJSON(w, 200, map[string]any{"ok": false, "error": "Search returned no results; rate limiting or proxy connectivity may be responsible", "backend": backend})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "count": len(results), "backend": backend})
@@ -2072,14 +2069,14 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	// Persist + broadcast the human turn so the 主 Agent 编排会话 survives page
+	// Persist and broadcast human turns so the main-agent conversation survives page
 	// reloads and updates live: the conversation lives in the activity stream as
 	// worker="mainagent" (the per-task activity table, replayed via SSE).
 	s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "user", Summary: req.Message})
 	if ma := s.mainAgentRef(); ma != nil {
-		// 人工操舵优先：若有正在跑的一轮，先取消它（抢占），新消息接管——绝不因"忙"而拒收。
-		// 旧行为在忙时返回 409，导致坏网络下卡住的一轮把用户的"暂停/梳理"指令挡在门外。
-		// 用 per-task 互斥串行化：抢占后等旧轮次的清理走完再接管，避免与其 defer 竞态。
+		// Human steering preempts a running round instead of rejecting input as busy.
+		// Previously a stuck network round could block pause/review instructions with HTTP 409.
+		// Serialize by task: wait for cancelled-round cleanup to finish before taking over.
 		s.chatMu.Lock()
 		if c := s.chatCancel[t.ID]; c != nil {
 			c()
@@ -2088,10 +2085,10 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		s.chatMu.Unlock()
 
 		go func() {
-			lock.Lock() // 等被抢占的旧轮次释放（其 defer 清 busy/cancel）后再接管
+			lock.Lock() // Wait for the preempted round to clear busy/cancel in its defer.
 			defer lock.Unlock()
 
-			// 单轮超时：坏网络/工具挂起时到点自动收尾，chatBusy 不再被无限占用而阻塞后续操舵。
+			// Per-round timeout prevents a stuck network/tool from blocking later steering indefinitely.
 			ctx, cancel := context.WithTimeout(s.ctx, chatTurnTimeout)
 			s.chatMu.Lock()
 			s.chatBusy[t.ID] = true
@@ -2110,7 +2107,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			emit := func(rec db.Activity) { s.engine.emitActivity(t, rec) }
 			maTaskID, _ := strconv.ParseInt(t.ID, 10, 64)
 			if _, err := ma.Chat(ctx, maTaskID, s.m.Assets(), t.Store, t.Goal, req.Message, emit, t.Notify); err != nil && ctx.Err() == nil {
-				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "（主 Agent 出错：" + err.Error() + "）"})
+				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "(Main agent error: " + err.Error() + ")"})
 			}
 		}()
 		writeJSON(w, 202, map[string]any{"status": "accepted", "mode": "llm"})
@@ -2141,19 +2138,19 @@ func (s *Server) stopChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"status": "stopping"})
 }
 
-// fallbackChat is the no-LLM human-steering handler: simple命令 + 态势摘要.
+// fallbackChat handles steering without an LLM using simple commands and a situation summary.
 func (s *Server) fallbackChat(t *Task, msg string) string {
 	m := strings.TrimSpace(msg)
 	lower := strings.ToLower(m)
 	switch {
-	case strings.HasPrefix(m, "意图") || strings.HasPrefix(lower, "intent"):
-		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "意图"), "intent"))
+	case strings.HasPrefix(m, "\u610f\u56fe") || strings.HasPrefix(lower, "intent"):
+		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "\u610f\u56fe"), "intent"))
 		_, _ = t.Store.AddIntent(map[string]any{"summary": text}, 9, nil, "human")
-		return "已注入一条高优先级意图：" + text
-	case strings.HasPrefix(m, "提示") || strings.HasPrefix(lower, "hint"):
-		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "提示"), "hint"))
+		return "High-priority intent added: " + text
+	case strings.HasPrefix(m, "\u63d0\u793a") || strings.HasPrefix(lower, "hint"):
+		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "\u63d0\u793a"), "hint"))
 		_, _ = t.Store.AddNode(db.KindHint, map[string]any{"text": text}, 0, "active", "human", nil)
-		return "已记录提示，规划者下次会读到：" + text
+		return "Hint recorded for the planner's next round: " + text
 	default:
 		assetCounts, _ := s.m.Assets().CountsByType()
 		assets := 0
@@ -2162,7 +2159,7 @@ func (s *Server) fallbackChat(t *Task, msg string) string {
 		}
 		fnd, _ := t.Store.ListByKind(db.KindFinding, 1000)
 		fr, _ := t.Store.Frontier(1000)
-		return fmt.Sprintf("（规则模式，未配置 LLM）当前态势：资产 %d，待领意图 %d，确认发现 %d。\n可用指令：以\"意图 ...\"注入意图，\"提示 ...\"给规划者提示。", assets, len(fr), len(fnd))
+		return fmt.Sprintf("Rule mode (LLM not configured): %d assets, %d pending intents, %d confirmed findings.\nUse \"intent ...\" to add an intent or \"hint ...\" to guide the planner.", assets, len(fr), len(fnd))
 	}
 }
 
@@ -2172,7 +2169,7 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "no active task")
 		return
 	}
-	findings, _ := t.Store.ListByKind(db.KindFinding, 1000) // 纯漏洞（事实是独立的 KindFact，不进报告）
+	findings, _ := t.Store.ListByKind(db.KindFinding, 1000) // Findings only; facts are excluded from reports.
 	counts := map[string]int{}
 	for _, ty := range []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"} {
 		ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)

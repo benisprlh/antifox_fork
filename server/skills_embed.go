@@ -22,7 +22,7 @@ var embeddedSkills embed.FS
 // materializeEmbeddedSkills writes each embedded default skill into skillDir when its
 // directory is absent (seed-if-missing). Existing skills and user edits are never
 // overwritten. report-generation is intentionally NOT embedded — it is regenerated
-// from Go defaults by report.SeedSkillFiles so its trilingual skeleton never drifts.
+// from Go defaults by report.SeedSkillFiles so its English skeleton never drifts.
 func materializeEmbeddedSkills(skillDir string) {
 	root, err := fs.Sub(embeddedSkills, "skillsdist")
 	if err != nil {
@@ -42,13 +42,13 @@ func materializeEmbeddedSkills(skillDir string) {
 			continue // already present → keep (never clobber edits)
 		}
 		if err := writeEmbeddedSkill(root, name, skillDir); err != nil {
-			log.Printf("[skill] 物化 %s 失败: %v", name, err)
+			log.Printf("[skill] Failed to materialize %s: %v", name, err)
 			continue
 		}
 		seeded++
 	}
 	if seeded > 0 {
-		log.Printf("[skill] 物化内置 skill %d 个 → %s", seeded, skillDir)
+		log.Printf("[skill] Materialized %d built-in skills → %s", seeded, skillDir)
 	}
 }
 
