@@ -6,7 +6,11 @@
 // of Events and threads context cancellation throughout.
 package harness
 
-import "antifox/engine/llm"
+import (
+	"errors"
+
+	"antifox/engine/llm"
+)
 
 // EventKind classifies a loop Event.
 type EventKind string
@@ -39,6 +43,7 @@ const (
 	ReasonBlockingLimit     TerminalReason = "blocking_limit"      // hard context limit hit pre-request
 	ReasonImageError        TerminalReason = "image_error"         // unsupported media (multimodal)
 	ReasonModelError        TerminalReason = "model_error"         // provider/API failure
+	ReasonModelRefusal      TerminalReason = "model_refusal"       // provider declined the request
 	ReasonAbortedStreaming  TerminalReason = "aborted_streaming"   // canceled during streaming
 	ReasonAbortedTools      TerminalReason = "aborted_tools"       // canceled during tool execution
 	ReasonPromptTooLong     TerminalReason = "prompt_too_long"     // overflow recovery exhausted
@@ -47,6 +52,10 @@ const (
 	ReasonMaxTurns          TerminalReason = "max_turns"           // hit MaxTurns
 	ReasonTimeout           TerminalReason = "timeout"             // hit a wall-clock run budget (host-imposed)
 )
+
+// ErrModelRefusal is a terminal provider decision, not a transient API failure.
+// Hosts should display it and stop the task instead of retrying an empty turn.
+var ErrModelRefusal = errors.New("The model declined this request (stop_reason: refusal). Review the task and the model provider's policies before trying again.")
 
 // ContinueReason names why the loop took another turn. These drive control
 // flow; they are recorded on the loop for telemetry.

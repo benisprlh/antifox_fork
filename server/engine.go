@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -434,6 +435,8 @@ func (e *Engine) plannerLoop(ctx context.Context, t *Task) {
 			met, reason, err := planner.Plan(ectx, taskIDInt, e.m.assets, t.Store, t.Goal, doneIntents, emit)
 			e.decInflight(t.ID)
 			switch {
+			case errors.Is(err, harness.ErrModelRefusal):
+				e.failRefusedTask(t)
 			case err != nil && ectx.Err() == nil:
 				log.Printf("[planner] Task %s planning failed: %v", t.ID, err)
 			case met:
@@ -565,6 +568,11 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 			t.Notify()
 			continue
 		}
+		if errors.Is(err, harness.ErrModelRefusal) {
+			_ = t.Store.SetIntentState(intent.ID, "blocked")
+			e.failRefusedTask(t)
+			continue
+		}
 		if err != nil {
 			log.Printf("[worker %s] intent %d: %v", name, intent.ID, err)
 		}
@@ -586,6 +594,16 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, name string) {
 		e.touch(t.ID)
 		t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	}
+}
+
+// A refusal needs user review; another planning round must not silently retry it.
+func (e *Engine) failRefusedTask(t *Task) {
+	if _, err := e.m.SetTaskStatusGuarded(t.ID, "failed"); err != nil {
+		log.Printf("[engine] Task %s failed to persist model refusal: %v", t.ID, err)
+	}
+	e.cancelExec(t.ID)
+	e.touch(t.ID)
+	log.Printf("[engine] Task %s stopped: %v", t.ID, harness.ErrModelRefusal)
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) (done bool) {

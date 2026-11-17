@@ -861,7 +861,7 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 	}
 	last := s.engine.LastActivity(t.ID)
 	paused := s.engine.IsPaused(t.ID)
-	running := s.engine.Ready() && s.engine.Started(t.ID) && !paused
+	running := s.engine.Ready() && s.engine.Started(t.ID) && !paused && !isTerminalStatus(s.m.TaskStatus(t.ID))
 	// stalled: running but no activity for a while and nothing in flight.
 	stalled := running && inFlight == 0 && last > 0 && time.Now().Unix()-last > 60
 
@@ -1179,9 +1179,13 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
 			Summary: "Round 0: goal decomposition"})
-		goals := s.createGoals(s.ctx, t, func(r db.Activity) {
+		goals, err := s.createGoals(s.ctx, t, func(r db.Activity) {
 			s.engine.emitActivity(t, r)
 		})
+		if err != nil {
+			s.engine.failRefusedTask(t)
+			return
+		}
 		for _, g := range goals {
 			summary := g.Text
 			if g.VulnClass != "" {

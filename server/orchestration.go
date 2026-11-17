@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"antifox/agent"
+	"antifox/db"
 	"antifox/engine/permission"
 	actool "antifox/engine/tool"
 )
@@ -279,8 +280,13 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				}
 			}
 			s.seed(t, a.Description+" "+a.Goal) // Seed initial assets for the event-driven loop.
-			s.createGoals(s.ctx, t, nil)        // LLM goal decomposition with rule-based fallback.
-			s.engine.Run(s.ctx, t)              // Start the exploration engine.
+			if _, err := s.createGoals(s.ctx, t, func(r db.Activity) {
+				s.engine.emitActivity(t, r)
+			}); err != nil {
+				s.engine.failRefusedTask(t)
+				return actool.Errorf(fmt.Sprintf("task %s failed: %v", t.ID, err)), nil
+			}
+			s.engine.Run(s.ctx, t) // Start the exploration engine.
 			return actool.Text(fmt.Sprintf("task created: %s", t.ID)), nil
 		})
 }

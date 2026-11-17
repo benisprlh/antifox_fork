@@ -38,9 +38,8 @@ type GoalSpec struct {
 }
 
 // DecomposeGoals asks the LLM to break a pentest task goal into discrete,
-// independently-verifiable objectives (each becomes a goal node). Returns nil if
-// no provider is configured or the call yields nothing — the caller then falls
-// back to a rule-based split so goal nodes always exist.
+// independently-verifiable objectives (each becomes a goal node). Errors are
+// returned so the caller can distinguish a provider refusal from an empty turn.
 //
 // desc is the task's free-text background: target scope, flag count, engagement instructions, etc.
 // It is fed alongside the goal so the decomposer no longer splits blind — the
@@ -48,10 +47,10 @@ type GoalSpec struct {
 //
 // emit, when non-nil, receives every LLM step (thinking/tool_use/result) with
 // Worker="planner" so the round-0 goal-decomposition activity is visible in the UI.
-func DecomposeGoals(ctx context.Context, c Config, goalText, desc string, emit func(db.Activity)) []GoalSpec {
+func DecomposeGoals(ctx context.Context, c Config, goalText, desc string, emit func(db.Activity)) ([]GoalSpec, error) {
 	prov, err := c.NewProvider()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var out struct {
 		Goals []GoalSpec `json:"goals"`
@@ -91,7 +90,7 @@ func DecomposeGoals(ctx context.Context, c Config, goalText, desc string, emit f
 			emit(r)
 		}
 	}
-	captureRun(ctx, agentcore.Options{
+	_, _, err = captureRun(ctx, agentcore.Options{
 		Provider:               prov,
 		SystemPrompt:           []string{sys},
 		Tools:                  []actool.CoreTool{submitTool},
@@ -99,8 +98,11 @@ func DecomposeGoals(ctx context.Context, c Config, goalText, desc string, emit f
 		DisableBackgroundTasks: true,
 		MaxTurns:               4,
 	}, userMsg, captureEmit)
-	if !captured {
-		return nil
+	if err != nil {
+		return nil, err
 	}
-	return out.Goals
+	if !captured {
+		return nil, nil
+	}
+	return out.Goals, nil
 }

@@ -121,6 +121,9 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 				}
 				flush() // flush any trailing thinking / non-final text
 				sum := ev.Terminal.Text
+				if sum == "" && ev.Terminal.Err != nil {
+					sum = ev.Terminal.Err.Error()
+				}
 				if sum == "" {
 					switch ev.Terminal.Reason {
 					case harness.ReasonAbortedTools, harness.ReasonAbortedStreaming:

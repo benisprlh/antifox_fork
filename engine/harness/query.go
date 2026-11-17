@@ -417,6 +417,10 @@ func (l *loop) run() {
 				return
 			}
 		}
+		if stopReason == "refusal" {
+			l.finish(ReasonModelRefusal, ErrModelRefusal, asst.Text())
+			return
+		}
 		toolUses := asst.ToolUses()
 
 		// max_tokens truncation with no tool calls → escalate / resume-recovery.
