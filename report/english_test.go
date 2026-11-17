@@ -44,3 +44,24 @@ func TestLegacyLocaleLoadsEnglishSkillEdits(t *testing.T) {
 		}
 	}
 }
+
+func TestNoFindingsDoesNotClaimTestsPassed(t *testing.T) {
+	in := &GenInput{ProjectName: "Public review", Scope: "Only public pages; no authenticated or destructive tests."}
+	doc := BuildDoc(context.Background(), nil, in)
+	for _, row := range doc.Checklist {
+		if row.Result != "not_assessed" {
+			t.Fatalf("unverified checklist result for %s: %s", row.Name, row.Result)
+		}
+	}
+	background := strings.Join(doc.Summary.Background, "\n")
+	if !strings.Contains(background, in.Scope) || !strings.Contains(background, "Coverage limitation:") {
+		t.Fatalf("missing scope/coverage: %s", background)
+	}
+	if strings.Contains(doc.Summary.RemediationConclusion, "pending remediation") {
+		t.Fatal("empty findings were described as pending remediation")
+	}
+	rows := buildChecklist([]checklistItem{{Name: "SQL injection"}, {Name: "Authentication bypass"}}, []string{"SQL injection"})
+	if rows[0].Result != "fail" || rows[1].Result != "not_assessed" {
+		t.Fatalf("finding-to-checklist mapping is inaccurate: %+v", rows)
+	}
+}

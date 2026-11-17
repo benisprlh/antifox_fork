@@ -88,7 +88,7 @@ func localizedDate(locale string) string { return time.Now().Format("January 2, 
 // ---- fallback prose (used only when the LLM is unavailable) ----
 
 func fallbackBackground(locale, client, company, project string) string {
-	return fmt.Sprintf("%s commissioned %s to perform a penetration test of the information systems related to %s. Security engineers simulated real-world attacker behaviour, combining manual testing with tooling to surface security risks from multiple angles and to provide hardening recommendations.", client, company, project)
+	return fmt.Sprintf("This report presents the recorded assessment results for %s, prepared by %s for %s. Actual testing is limited to the task's authorized scope and retained evidence.", project, company, client)
 }
 
 // infoSeg / infoSegParen append an "info"-severity segment to a breakdown only

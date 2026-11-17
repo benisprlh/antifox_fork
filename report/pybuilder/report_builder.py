@@ -65,7 +65,7 @@ LABELS = {"en-US": {
         "sub_desc": "1. Description", "sub_url": "2. URL", "sub_module": "3. Affected Module",
         "sub_process": "4. Test Process", "sub_risk": "5. Risk Analysis",
         "sub_fix": "6. Remediation", "sub_status": "7. Remediation Status",
-        "chk_pass": "Pass", "chk_fail": "Fail",
+        "chk_pass": "Pass", "chk_fail": "Fail", "chk_not_assessed": "Not assessed",
         "kv_sep": ": ", "lparen": " (", "rparen": ")", "cvss_sep": " / ", "cvss_word": "CVSS ",
         "cvss_vector_row": "CVSS Vector", "cvss_overall": "Overall score {c}",
         "cvss_metric_names": [["AV", "Attack Vector"], ["AC", "Attack Complexity"], ["PR", "Privileges Required"], ["UI", "User Interaction"],
@@ -591,16 +591,17 @@ def build_ch2(doc, data, meta):
 def build_checklist(doc, checklist, meta):
     t = doc.add_table(rows=1 + len(checklist), cols=4)
     t.alignment = WD_TABLE_ALIGNMENT.CENTER
-    set_col_widths(t, [2.3, 3.4, 8.5, 1.3])
+    set_col_widths(t, [2.3, 3.4, 7.7, 2.1])
     set_table_borders(t)
     for j, h in enumerate(L(meta, "hdr_checklist")):
         set_cell_text(t.rows[0].cells[j], h, size_pt=9.5, bold=True,
                       align=WD_ALIGN_PARAGRAPH.CENTER, shade=HEADER_SHADE)
     repeat_header(t)
     for i, item in enumerate(checklist, 1):
-        # Go emits a stable "pass" | "fail" token; localize the display here.
+        # Absence of a finding is not evidence that a test passed.
         hit = item.get('result') == 'fail'
-        result_txt = L(meta, "chk_fail") if hit else L(meta, "chk_pass")
+        result_key = {"fail": "chk_fail", "pass": "chk_pass"}.get(item.get('result'), "chk_not_assessed")
+        result_txt = L(meta, result_key)
         set_cell_text(t.rows[i].cells[0], item.get('category', ''), size_pt=9, align=WD_ALIGN_PARAGRAPH.LEFT)
         set_cell_text(t.rows[i].cells[1], item.get('name', ''), size_pt=9, bold=hit, align=WD_ALIGN_PARAGRAPH.LEFT)
         set_cell_text(t.rows[i].cells[2], item.get('desc', ''), size_pt=9, align=WD_ALIGN_PARAGRAPH.LEFT)

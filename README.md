@@ -99,7 +99,7 @@ Full steps (skill embedding, dev hot-reload) are in [CONTRIBUTING.md](CONTRIBUTI
 1. Configure an LLM profile in **System Settings**, then create a task with a target, explicit scope, and a measurable goal. A task pinned to a profile uses that profile's model.
 2. Enable **Traffic capture** before starting if you need saved HTTP exchanges. Changes apply to subsequent agent runs; an already-running worker retains its current settings until its next run.
 3. Follow the planner and workers in the task's **Sessions** tab. **Idle** means no worker is executing; check the task status and goal progress. **Done** means the goals were met. **Failed** may include a provider refusal; read the session error and review the request and provider policies before retrying.
-4. Review findings against their actual request/response evidence. Mark unsupported findings **False positive**; these are excluded from generated reports. Generate and download the English report after review.
+4. Review findings against their actual request/response evidence. Mark unsupported findings **False positive**; these are excluded from generated reports. Generate and download the English report after review. Checklist items without supporting findings are **Not assessed**; a lack of findings does not establish that every test passed.
 
 The Docker image uses its bundled Chromium for the browser MCP. Source installations must provide a compatible browser executable through `PLAYWRIGHT_MCP_EXECUTABLE_PATH` or the MCP `--executable-path` option.
 

@@ -106,7 +106,7 @@ type GenInput struct {
 	CompanyNameEn string
 	ClientName    string
 	ProjectName   string // Short cover/title name, never the entire target list.
-	Scope         string // Full testing scope, used for AI context rather than the cover.
+	Scope         string // Full testing scope, included in the summary and AI context.
 	ReportTitle   string
 	Version       string
 	Locale        string
@@ -189,11 +189,19 @@ func BuildDoc(ctx context.Context, pg *db.DB, in *GenInput) *reportDoc {
 	if len(doc.Summary.Background) == 0 {
 		doc.Summary.Background = []string{fallbackBackground(loc, defaultStr(in.ClientName, clientDefault(loc)), in.CompanyName, in.ProjectName)}
 	}
+	if scope := strings.TrimSpace(in.Scope); scope != "" {
+		doc.Summary.Background = append(doc.Summary.Background, "Authorized scope: "+scope)
+	}
+	doc.Summary.Background = append(doc.Summary.Background,
+		"Coverage limitation: this report summarizes recorded findings within the authorized scope. The absence of a recorded finding does not establish that a test passed. Checklist items without supporting findings are marked Not assessed; consult task facts and request/response evidence for actual test coverage. The methodology below is a reference workflow, not proof that every phase was performed.")
 	if doc.Summary.ServiceResult == "" {
 		doc.Summary.ServiceResult = fallbackServiceResult(loc, len(in.Findings), cAll["critical"], cAll["high"], cAll["medium"], cAll["low"], cAll["info"])
 	}
 	if doc.Summary.RemediationConclusion == "" {
 		doc.Summary.RemediationConclusion = fallbackRemediationConclusion(loc)
+	}
+	if len(in.Findings) == 0 {
+		doc.Summary.RemediationConclusion = "No confirmed findings remain for remediation in this report. This does not establish that untested functionality is secure; further testing must remain within the authorized scope."
 	}
 	doc.Checklist = buildChecklist(sk.Checklist, rl.ChecklistHits)
 	doc.FindingsIntro = fallbackFindingsIntro(loc, in.CompanyName, cAll["critical"], cAll["high"], cAll["medium"], cAll["low"], cAll["info"])
@@ -389,8 +397,8 @@ func personnelRows(loc string, rows []PersonInput, skillDefault []map[string]str
 	return out
 }
 
-// buildChecklist emits a stable "pass" | "fail" token in Result; the Python
-// renderer localizes the display word and applies the red-bold "fail" styling.
+// Finding categories establish failures, not successful coverage of every other
+// checklist item. Never infer a pass solely from the absence of a finding.
 func buildChecklist(items []checklistItem, hits []string) []checkRow {
 	hitSet := map[string]bool{}
 	for _, h := range hits {
@@ -398,7 +406,7 @@ func buildChecklist(items []checklistItem, hits []string) []checkRow {
 	}
 	out := make([]checkRow, 0, len(items))
 	for _, c := range items {
-		res := "pass"
+		res := "not_assessed"
 		if hitSet[normalizeName(c.Name)] {
 			res = "fail"
 		}
