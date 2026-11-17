@@ -70,33 +70,33 @@ func writeIfMissing(path, content string) error {
 
 const skillMD = `---
 name: report-generation
-description: 渗透测试报告生成的可编辑内容——AI 改写 prompt 与固定骨架（方法论/测试清单/工具/参考规范/测试人员），按语言分文件。报告引擎每次生成读盘，编辑即时生效。
+description: Editable penetration testing report content, including AI rewriting prompts and fixed sections (methodology, checklist, tools, standards, personnel), organized by language. The report engine reads files on each generation, so edits take effect immediately.
 ---
 
-# 报告生成（可编辑内容）
+# Report Generation (Editable Content)
 
-本 skill 存放**渗透测试报告的可编辑内容**，供「报告管理」的生成管线读取。修改后**下次生成即时生效**，无需重启或重新编译；任一文件缺失或损坏会自动回退到内置默认值。
+This skill stores **editable penetration testing report content** for the Report Management generation pipeline. Changes take effect **the next time a report is generated**, without restarting or rebuilding. Missing or damaged files automatically fall back to built-in defaults.
 
-## 结构
+## Structure
 
-- ` + "`prompts/report-level.tmpl`" + ` — 报告级叙述的 AI 提示词（背景 / 服务成果 / 整改结论 / 命中的测试项）。
-- ` + "`prompts/vuln-narrative.tmpl`" + ` — 单条漏洞改写的 AI 提示词（描述 / 复现过程 / 风险 / 修复 / CVSS）。
-- ` + "`skeleton/<语言>/methodology.json`" + ` — 2.2 测试流程：` + "`{intro, phases:[{name,desc}]}`" + `。
-- ` + "`skeleton/<语言>/checklist.json`" + ` — 2.3 测试清单：` + "`[{category,name,desc}]`" + `。AI 判定命中的项渲染为「不通过」。
-- ` + "`skeleton/<语言>/tools.json`" + ` — 2.4 测试工具：` + "`[{name,desc}]`" + `。
-- ` + "`skeleton/<语言>/standards.json`" + ` — 2.5 参考规范：` + "`[\"...\"]`" + `。
-- ` + "`skeleton/<语言>/personnel.json`" + ` — 2.1 测试人员默认值：` + "`[{name,role,contact}]`" + `（用户在报告设置里填了就以其为准）。
+- ` + "`prompts/report-level.tmpl`" + ` — AI prompts for report-level narrative (background, service results, remediation conclusions, matched checklist items).
+- ` + "`prompts/vuln-narrative.tmpl`" + ` — AI prompts for rewriting individual findings (description, reproduction, risk, remediation, CVSS).
+- ` + "`skeleton/<language>/methodology.json`" + ` — Section 2.2, testing process: ` + "`{intro, phases:[{name,desc}]}`" + `.
+- ` + "`skeleton/<language>/checklist.json`" + ` — Section 2.3, testing checklist: ` + "`[{category,name,desc}]`" + `. Items identified by AI as affected are rendered as "Fail".
+- ` + "`skeleton/<language>/tools.json`" + ` — Section 2.4, testing tools: ` + "`[{name,desc}]`" + `.
+- ` + "`skeleton/<language>/standards.json`" + ` — Section 2.5, reference standards: ` + "`[\"...\"]`" + `.
+- ` + "`skeleton/<language>/personnel.json`" + ` — Section 2.1, default testing personnel: ` + "`[{name,role,contact}]`" + `. Values entered in report settings take precedence.
 
-语言目录：` + "`zh-CN`" + `（简体）/ ` + "`zh-TW`" + `（繁体）/ ` + "`en-US`" + `（英文）。
+Language directories: ` + "`zh-CN`" + ` (Simplified Chinese), ` + "`zh-TW`" + ` (Traditional Chinese), and ` + "`en-US`" + ` (English).
 
-## Prompt 模板变量
+## Prompt Template Variables
 
-提示词是 Go ` + "`text/template`" + `，用 ` + "`===USER===`" + ` 分隔 system 与 user 两段：
+Prompts use Go ` + "`text/template`" + `, with ` + "`===USER===`" + ` separating the system and user sections:
 
-- 报告级：` + "`{{.Company}}` `{{.Project}}` `{{.Client}}` `{{.FindingsList}}` `{{.LangDirective}}`" + `
-- 漏洞级：` + "`{{.Company}}` `{{.VulnClass}}` `{{.Severity}}` `{{.Summary}}` `{{.PoC}}` `{{.LangDirective}}`" + `
+- Report level: ` + "`{{.Company}}` `{{.Project}}` `{{.Client}}` `{{.FindingsList}}` `{{.LangDirective}}`" + `
+- Finding level: ` + "`{{.Company}}` `{{.VulnClass}}` `{{.Severity}}` `{{.Summary}}` `{{.PoC}}` `{{.LangDirective}}`" + `
 
-` + "`{{.LangDirective}}`" + ` 会注入目标语言指令（简/繁/英），故 prompt 本身与语言无关、三语共用一份。
+` + "`{{.LangDirective}}`" + ` injects the target language instruction (Simplified Chinese, Traditional Chinese, or English), so the same language-independent prompt is shared across all three languages.
 `
 
 const promptReportLevelTmpl = `你是{{.Company}}的资深渗透测试报告撰写专家，擅长撰写专业、客户可读、技术严谨的渗透测试报告。严格只输出 JSON，不要 markdown 代码块。

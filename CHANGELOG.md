@@ -1,28 +1,28 @@
-# 更新日志 · Changelog
+# Changelog
 
-本项目的版本更新摘要。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本遵循 [SemVer](https://semver.org/)。
+Release highlights for this project. The format follows [Keep a Changelog](https://keepachangelog.com/), and versions follow [Semantic Versioning](https://semver.org/).
 
 ## v2.0.3
 
-- **LLM 自定义会话头**：每个 LLM 配置可设一个 HTTP 头，头值自动为当前会话 session id —— 适配 opencode 等按 session 做提示缓存 / 粘性路由的网关。
-- **全局出口代理**：所有 Agent 的目标流量可经一个出口代理（http/https/socks5）出网，隐藏源 IP / 走跳板；带「测试可用性」（经代理回显出口 IP）。
-- **按任务选出口**：新建任务时可选该任务走全局代理还是直连。
-- **确认即富化**：人工确认漏洞后自动富化成结构化数据，确认即可交付。
-- **报告管理**：新建报告默认只列已确认漏洞（显示状态 / CVSS）；正文复用已富化数据。
-- **证据图注自动填充**：证据截图图注按复现步骤文案自动生成，可编辑。
-- **漏洞详情打磨**：状态下拉、分区标题、一键复制。
-- **流量任务筛选修复**：按任务筛选叠加任务活动时间窗，同一目标多次测试不再串流量。
-- 系统配置页改为双列自适应布局。
+- **Custom LLM session header**: Each LLM configuration can specify an HTTP header whose value is automatically set to the current session ID. This supports gateways such as opencode that use sessions for prompt caching or sticky routing.
+- **Global outbound proxy**: All agents can route target traffic through an HTTP, HTTPS, or SOCKS5 proxy to hide the source IP or use a relay. A connectivity test displays the outbound IP through the proxy.
+- **Per-task outbound routing**: When creating a task, choose whether it uses the global proxy or connects directly.
+- **Enrichment on confirmation**: Manually confirming a finding automatically enriches it into structured data for report delivery.
+- **Report management**: New reports list only confirmed findings by default, including status and CVSS. Report content reuses enriched data.
+- **Automatic evidence captions**: Screenshot captions are generated from reproduction steps and remain editable.
+- **Finding details improvements**: Status dropdown, section headings, and one-click copying.
+- **Traffic filtering fix**: Filtering by task now also applies the task's activity window, keeping traffic from separate tests of the same target apart.
+- The System Settings page now uses a responsive two-column layout.
 
 ## v2.0.2
 
-- **一键更新**：从系统配置页检查并安装 GitHub 新版本（SHA256 校验 / 原子换装 / 失败自动回滚），数据不受影响。
-- 发布产物内附 `start.sh` 守护脚本与 systemd 模板。
+- **One-click updates**: Check for and install new GitHub releases from System Settings, with SHA256 verification, atomic replacement, and automatic rollback on failure. Existing data is preserved.
+- Release packages include the `start.sh` supervisor script and a systemd service template.
 
 ## v2.0.1
 
-- 复现步骤落库时自动关联真实流量包。
+- Reproduction steps are automatically linked to the corresponding recorded traffic when saved.
 
 ## v2.0.0
 
-- 证据驱动交付：复现过程就地落库、发现页按利用链分步、每步关联真实流量包；人工级三语报告。
+- Evidence-driven delivery: Capture reproduction steps as they happen, display findings as step-by-step exploit chains, and link each step to recorded traffic. Generate professional reports in Simplified Chinese, Traditional Chinese, or English.
