@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"net/http"
@@ -19,6 +20,7 @@ const (
 	SETextDelta         StreamEventType = "text_delta"
 	SEThinkingDelta     StreamEventType = "thinking_delta"
 	SEThinkingSignature StreamEventType = "thinking_signature"
+	SEReasoningItem     StreamEventType = "reasoning_item" // opaque Responses reasoning, replayed without displaying it
 	SEToolUseStart      StreamEventType = "tool_use_start"
 	SEToolInputJSON     StreamEventType = "tool_input_delta"
 	SEMessageDelta      StreamEventType = "message_delta" // carries stop_reason / usage
@@ -27,15 +29,17 @@ const (
 
 // StreamEvent is one normalized model-level streaming event (FR-03.5).
 type StreamEvent struct {
-	Type       StreamEventType
-	Text       string // text/thinking/tool_input JSON fragment
-	ToolID     string // tool_use_start
-	ToolName   string // tool_use_start
-	StopReason string // message_delta
-	Usage      Usage  // message_start / message_delta
+	Type           StreamEventType
+	Text           string // text/thinking/tool_input JSON fragment
+	ToolID         string // tool_use_start
+	ToolName       string // tool_use_start
+	StopReason     string // message_delta
+	Usage          Usage  // message_start / message_delta
+	ProviderItem   json.RawMessage
+	ProviderFormat Format
 }
 
-// Format selects the wire protocol of a Provider.
+// Format selects a provider preset or an explicit API wire protocol.
 type Format string
 
 const (
@@ -44,7 +48,38 @@ const (
 	// FormatOpenAIResponses speaks the OpenAI Responses API (POST /v1/responses),
 	// distinct from FormatOpenAI's Chat Completions (/chat/completions).
 	FormatOpenAIResponses Format = "openai-responses"
+	FormatGrok            Format = "grok"
+	FormatDeepSeek        Format = "deepseek"
 )
+
+// DefaultModel and DefaultBaseURL are also used by host configuration validation.
+func DefaultModel(format Format) string {
+	switch format {
+	case FormatAnthropic:
+		return "claude-opus-4-8"
+	case FormatOpenAI, FormatOpenAIResponses:
+		return "gpt-4o"
+	case FormatGrok:
+		return "grok-4.7"
+	case FormatDeepSeek:
+		return "deepseek-flash"
+	}
+	return ""
+}
+
+func DefaultBaseURL(format Format) string {
+	switch format {
+	case FormatAnthropic:
+		return "https://api.anthropic.com"
+	case FormatOpenAI, FormatOpenAIResponses:
+		return "https://api.openai.com/v1"
+	case FormatGrok:
+		return "https://api.x.ai/v1"
+	case FormatDeepSeek:
+		return "https://api.deepseek.com"
+	}
+	return ""
+}
 
 // Config configures the built-in providers (FR-03.4).
 type Config struct {
@@ -107,6 +142,9 @@ type Provider interface {
 // NewProvider builds a built-in provider for cfg.Format. Missing APIKey/BaseURL
 // fall back to standard environment variables and public endpoints.
 func NewProvider(cfg Config) (Provider, error) {
+	if cfg.Model == "" {
+		cfg.Model = DefaultModel(cfg.Format)
+	}
 	if cfg.HTTPClient == nil {
 		client, err := defaultHTTPClient(cfg.Proxy)
 		if err != nil {
@@ -145,8 +183,24 @@ func NewProvider(cfg Config) (Provider, error) {
 			cfg.BaseURL = envOr("OPENAI_BASE_URL", "https://api.openai.com/v1")
 		}
 		return &openaiResponsesProvider{cfg: cfg}, nil
+	case FormatGrok:
+		if cfg.APIKey == "" {
+			cfg.APIKey = os.Getenv("XAI_API_KEY")
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = envOr("XAI_BASE_URL", DefaultBaseURL(cfg.Format))
+		}
+		return &openaiResponsesProvider{cfg: cfg}, nil
+	case FormatDeepSeek:
+		if cfg.APIKey == "" {
+			cfg.APIKey = os.Getenv("DEEPSEEK_API_KEY")
+		}
+		if cfg.BaseURL == "" {
+			cfg.BaseURL = envOr("DEEPSEEK_BASE_URL", DefaultBaseURL(cfg.Format))
+		}
+		return &openaiProvider{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("llm: unknown format %q (use anthropic, openai or openai-responses)", cfg.Format)
+		return nil, fmt.Errorf("llm: unknown provider %q (use anthropic, openai, openai-responses, grok or deepseek)", cfg.Format)
 	}
 }
 

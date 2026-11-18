@@ -60,7 +60,7 @@ v2.0 is about one thing — **turning "can find it" into "can deliver it."** The
 
 ## Quick Start
 
-Requires **PostgreSQL**; exploration needs an **LLM** (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, or configure it in the UI). Generating `.docx` reports needs `python3` + `python-docx` (bundled in the Docker image).
+Requires **PostgreSQL**; exploration needs an **LLM** (configure a provider profile in the UI, or set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, or `DEEPSEEK_API_KEY`). Generating `.docx` reports needs `python3` + `python-docx` (bundled in the Docker image).
 
 ### Option 1: Docker build (recommended)
 
@@ -93,6 +93,21 @@ CGO_ENABLED=0 go build -tags embedui -o antifox ./cmd/antifox
 Full steps (skill embedding, dev hot-reload) are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 > **One-click update:** for a binary/source deploy, launch via `./start.sh` or systemd (see [`deploy/antifox.service`](deploy/antifox.service), set `RestartForceExitStatus=75`) to check for and install new versions from **System Settings** (SHA256 verify / atomic swap / rollback; data unaffected). Updates are available only after releases are published in this fork. Development builds use the source build workflow. For Docker, pull the latest source and run `docker compose up -d --build`.
+
+### Configure Grok or DeepSeek
+
+Open **System Settings → LLM → New Profile**, then select **Grok (xAI)** or **DeepSeek**. The provider selection fills in the model and base URL; both remain editable for other supported models or a compatible gateway.
+
+| Provider | Default model | Base URL | API |
+| --- | --- | --- | --- |
+| Grok (xAI) | `grok-4.7` | `https://api.x.ai/v1` | Responses |
+| DeepSeek | `deepseek-flash` | `https://api.deepseek.com` | Chat Completions |
+
+The presets follow the [Grok API documentation](https://docs.x.ai/developers/rest-api-reference/inference/responses) and [DeepSeek API documentation](https://api-docs.deepseek.com/). Enter that provider's API key, save the profile, and click **Test Connection**. Set it active for new tasks, or select it explicitly when creating a task. Saving a profile alone does not activate it. Changing a saved provider or API base URL requires entering a key again.
+
+Grok reasoning stays enabled; choose the provider default or an effort from Low to Extra high. DeepSeek supports its provider default, enabled reasoning, or disabled reasoning. The adapters preserve the reasoning state required to continue tool calls. See the [Grok reasoning guide](https://docs.x.ai/developers/model-capabilities/text/reasoning) and [DeepSeek thinking guide](https://api-docs.deepseek.com/guides/thinking_mode/).
+
+For environment-based configuration, set `ANTIFOX_LLM_PROVIDER=grok` with `XAI_API_KEY`, or `ANTIFOX_LLM_PROVIDER=deepseek` with `DEEPSEEK_API_KEY`. `ANTIFOX_LLM_MODEL` and `ANTIFOX_LLM_BASE_URL` override the defaults. Saved UI profiles take precedence over environment configuration.
 
 ### Run and review a task
 

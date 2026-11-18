@@ -986,8 +986,8 @@
     "newProfileDesc": "A new profile won't be activated automatically. Set it active in the list to enable it.",
     "namePlaceholder": "e.g. OpenAI Production",
     "profileNamePlaceholder": "Profile name",
-    "format": "Format",
-    "selectFormat": "Select format",
+    "format": "Provider",
+    "selectFormat": "Select provider",
     "model": "Model",
     "baseUrlLabel": "Base URL (optional)",
     "proxyLabel": "Proxy (optional)",
@@ -1029,7 +1029,8 @@
       "low": "Low",
       "medium": "Medium",
       "high": "High",
-      "max": "Max"
+      "max": "Max",
+      "xhigh": "Extra high"
     },
     "thinkMode": {
       "none": "Don't send (default)",
@@ -1052,7 +1053,9 @@
       "cannotDeleteActive": "Cannot delete the currently active Profile",
       "deleted": "Profile deleted: {{name}}",
       "deleteFailed": "Delete failed: {{msg}}"
-    }
+    },
+    "providerKeyRequired": "Enter an API key for the selected provider. The saved key belongs to the previous provider.",
+    "providerKeyScope": "Changing the provider or API base URL requires a new API key."
   },
   "rbac": {
     "title": "User Management",

@@ -41,6 +41,10 @@ func (a *Accumulator) Add(ev StreamEvent) {
 		a.thinkBuf.WriteString(ev.Text)
 	case SEThinkingSignature:
 		a.thinkSig = ev.Text
+	case SEReasoningItem:
+		a.flushText()
+		a.flushThinking()
+		a.blocks = append(a.blocks, ContentBlock{Type: BlockReasoning, ProviderItem: ev.ProviderItem, ProviderFormat: ev.ProviderFormat})
 	case SEToolUseStart:
 		a.flushText()
 		a.flushThinking()

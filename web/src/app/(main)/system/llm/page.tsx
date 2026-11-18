@@ -25,7 +25,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
-import type { LLMProfile, LLMPoolStatus } from "@/lib/types";
+import { LLM_PROVIDERS, providerPreset } from "@/lib/llm-providers";
+import type { LLMProfile, LLMPoolStatus, LLMProvider } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 // Thinking effort applies only when enabled.
@@ -48,12 +49,16 @@ const THINK_MODES: { value: ThinkMode; labelKey: string }[] = [
 const toStore = (mode: ThinkMode, effort: string) => (mode === "on" ? effort : mode === "off" ? "off" : "");
 const modeFromStore = (v?: string): ThinkMode => (!v ? "none" : v === "off" ? "off" : "on");
 const effortFromStore = (v?: string) => (v && v !== "off" ? v : "high");
+const effortLevels = (provider: LLMProvider) =>
+  EFFORT_LEVELS.map((o) =>
+    provider === "grok" && o.value === "max" ? { value: "xhigh", labelKey: "llm.effort.xhigh" } : o,
+  );
 
 function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
-  const [format, setFormat] = React.useState<"anthropic" | "openai">("anthropic");
+  const [format, setFormat] = React.useState<LLMProvider>("anthropic");
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
@@ -64,6 +69,17 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
   const [cw, setCw] = React.useState("0");
   const [thinkMode, setThinkMode] = React.useState<ThinkMode>("none");
   const [effort, setEffort] = React.useState("high");
+
+  function changeProvider(next: LLMProvider) {
+    const preset = providerPreset(next);
+    setFormat(next);
+    setModel(preset.model);
+    setBaseUrl(preset.baseUrl);
+    setCw(String(preset.contextWindowK));
+    setThinkMode("none");
+    setEffort("high");
+    setApiKey("");
+  }
 
   function reset() {
     setName("");
@@ -139,13 +155,16 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label>{t("llm.format")}</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai")}>
+              <Select value={format} onValueChange={(v) => changeProvider(v as LLMProvider)}>
                 <SelectTrigger>
                   <SelectValue placeholder={t("llm.selectFormat")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="anthropic">Anthropic</SelectItem>
-                  <SelectItem value="openai">OpenAI</SelectItem>
+                  {LLM_PROVIDERS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -153,11 +172,17 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
               <Label htmlFor="np-model">{t("llm.model")}</Label>
               <Input
                 id="np-model"
+                list="np-model-options"
                 className="font-mono"
-                placeholder="claude-opus-4-8"
+                placeholder={providerPreset(format).model}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
+              <datalist id="np-model-options">
+                {providerPreset(format).models.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
             </div>
           </div>
           <div className="grid gap-2">
@@ -165,7 +190,7 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
             <Input
               id="np-base-url"
               className="font-mono"
-              placeholder="https://api.openai.com/v1"
+              placeholder={providerPreset(format).baseUrl}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
             />
@@ -196,7 +221,8 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
             <Input
               id="np-api-key"
               type="password"
-              placeholder="sk-…"
+              autoComplete="new-password"
+              placeholder={format === "grok" ? "xai-…" : "sk-…"}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
             />
@@ -234,7 +260,7 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {THINK_MODES.map((o) => (
+                  {THINK_MODES.filter((o) => format !== "grok" || o.value !== "off").map((o) => (
                     <SelectItem key={o.value} value={o.value}>
                       {t(o.labelKey)}
                     </SelectItem>
@@ -253,7 +279,7 @@ function NewProfileDialog({ onCreated }: { onCreated: (id: string) => void }) {
                     <SelectValue placeholder={t("llm.effortPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {EFFORT_LEVELS.map((o) => (
+                    {effortLevels(format).map((o) => (
                       <SelectItem key={o.value} value={o.value}>
                         {t(o.labelKey)}
                       </SelectItem>
@@ -279,7 +305,7 @@ export default function LLMPage() {
   const { t } = useTranslation();
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [format, setFormat] = React.useState<"anthropic" | "openai">("anthropic");
+  const [format, setFormat] = React.useState<LLMProvider>("anthropic");
   const [name, setName] = React.useState("");
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
@@ -374,7 +400,7 @@ export default function LLMPage() {
   React.useEffect(() => {
     if (!selected) return;
     setName(selected.name);
-    setFormat(selected.format === "anthropic" ? "anthropic" : "openai");
+    setFormat(selected.format);
     setModel(selected.model);
     setBaseUrl(selected.base_url ?? "");
     setProxy(selected.proxy ?? "");
@@ -383,13 +409,33 @@ export default function LLMPage() {
     setRpm(String(selected.rate_per_minute ?? 0));
     setCw(String(selected.context_window_k ?? 0));
     setThinkMode(modeFromStore(selected.reasoning_effort));
-    setEffort(effortFromStore(selected.reasoning_effort));
+    setEffort(
+      selected.format === "grok" && selected.reasoning_effort === "max"
+        ? "xhigh"
+        : effortFromStore(selected.reasoning_effort),
+    );
     setApiKey("");
     setKeyHint(selected.api_key_hint ?? "");
   }, [selected]);
 
+  function changeProvider(next: LLMProvider) {
+    const preset = providerPreset(next);
+    setFormat(next);
+    setModel(preset.model);
+    setBaseUrl(preset.baseUrl);
+    setCw(String(preset.contextWindowK));
+    setThinkMode("none");
+    setEffort("high");
+    setApiKey("");
+    setKeyHint("");
+  }
+
   async function testConnection() {
     if (testing) return;
+    if (selected && selected.format !== format && !apiKey.trim()) {
+      toast.error(t("llm.providerKeyRequired"));
+      return;
+    }
     setTesting(true);
     try {
       // test with the SAME thinking params the profile will run with, so an
@@ -414,6 +460,10 @@ export default function LLMPage() {
   }
 
   async function save() {
+    if (selected && selected.format !== format && !apiKey.trim()) {
+      toast.error(t("llm.providerKeyRequired"));
+      return;
+    }
     if (!selectedId) {
       toast.error(t("llm.toast.selectOrCreate"));
       return;
@@ -529,9 +579,7 @@ export default function LLMPage() {
                       {t(`llm.pool.state_${m.state}`)}
                     </Badge>
                     {m.state === "tripped" && (
-                      <span className="text-xs text-red-500">
-                        {t("llm.pool.cooldown", { s: m.cooldown_secs })}
-                      </span>
+                      <span className="text-xs text-red-500">{t("llm.pool.cooldown", { s: m.cooldown_secs })}</span>
                     )}
                     <div className="ml-auto flex items-center gap-3">
                       {!m.active && (
@@ -547,7 +595,10 @@ export default function LLMPage() {
                       )}
                       <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         {t("llm.pool.exclude")}
-                        <Switch checked={m.excluded} onCheckedChange={(v) => setProfilePool(m.profile_id, m.priority, v)} />
+                        <Switch
+                          checked={m.excluded}
+                          onCheckedChange={(v) => setProfilePool(m.profile_id, m.priority, v)}
+                        />
                       </label>
                       {m.state !== "ok" && (
                         <Button
@@ -561,10 +612,7 @@ export default function LLMPage() {
                       )}
                     </div>
                     {m.last_error && m.state !== "ok" && (
-                      <span
-                        className="w-full truncate text-[11px] text-muted-foreground"
-                        title={m.last_error}
-                      >
+                      <span className="w-full truncate text-[11px] text-muted-foreground" title={m.last_error}>
                         {m.last_error}
                       </span>
                     )}
@@ -586,12 +634,15 @@ export default function LLMPage() {
                 <div key={r.role} className="flex items-center gap-3">
                   <span className="w-24 shrink-0 text-sm font-medium">{t(`llm.roles.role_${r.role}`)}</span>
                   <Select value={r.profile_id} onValueChange={(v) => setRole(r.role, v)}>
-                    <SelectTrigger className="h-8 flex-1"><SelectValue /></SelectTrigger>
+                    <SelectTrigger className="h-8 flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="0">{t("llm.roles.followActive")}</SelectItem>
                       {profiles.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          {p.name}{p.is_default ? " ★" : ""}
+                          {p.name}
+                          {p.is_default ? " ★" : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -618,9 +669,7 @@ export default function LLMPage() {
                   t("llm.formatConfig")
                 )}
               </CardTitle>
-              <CardDescription>
-                {selected ? t("llm.editDescSelected") : t("llm.editDescEmpty")}
-              </CardDescription>
+              <CardDescription>{selected ? t("llm.editDescSelected") : t("llm.editDescEmpty")}</CardDescription>
             </CardHeader>
             {selected ? (
               <CardContent className="grid gap-4">
@@ -636,13 +685,16 @@ export default function LLMPage() {
                   </div>
                   <div className="grid gap-2">
                     <Label>{t("llm.format")}</Label>
-                    <Select value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai")}>
+                    <Select value={format} onValueChange={(v) => changeProvider(v as LLMProvider)}>
                       <SelectTrigger>
                         <SelectValue placeholder={t("llm.selectFormat")} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="anthropic">Anthropic</SelectItem>
-                        <SelectItem value="openai">OpenAI</SelectItem>
+                        {LLM_PROVIDERS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -652,11 +704,17 @@ export default function LLMPage() {
                   <Label htmlFor="model">{t("llm.model")}</Label>
                   <Input
                     id="model"
+                    list="model-options"
                     className="font-mono"
-                    placeholder="claude-opus-4-8"
+                    placeholder={providerPreset(format).model}
                     value={model}
                     onChange={(e) => setModel(e.target.value)}
                   />
+                  <datalist id="model-options">
+                    {providerPreset(format).models.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
                 </div>
 
                 <div className="grid gap-2">
@@ -664,7 +722,7 @@ export default function LLMPage() {
                   <Input
                     id="base-url"
                     className="font-mono"
-                    placeholder="https://api.openai.com/v1"
+                    placeholder={providerPreset(format).baseUrl}
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
                   />
@@ -699,10 +757,14 @@ export default function LLMPage() {
                   <Input
                     id="api-key"
                     type="password"
-                    placeholder={keyHint ? t("llm.keySetHint", { hint: keyHint }) : "sk-…"}
+                    autoComplete="new-password"
+                    placeholder={
+                      keyHint ? t("llm.keySetHint", { hint: keyHint }) : format === "grok" ? "xai-…" : "sk-…"
+                    }
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
                   />
+                  <p className="text-muted-foreground text-xs">{t("llm.providerKeyScope")}</p>
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -742,7 +804,7 @@ export default function LLMPage() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {THINK_MODES.map((o) => (
+                        {THINK_MODES.filter((o) => format !== "grok" || o.value !== "off").map((o) => (
                           <SelectItem key={o.value} value={o.value}>
                             {t(o.labelKey)}
                           </SelectItem>
@@ -761,7 +823,7 @@ export default function LLMPage() {
                           <SelectValue placeholder={t("llm.effortPlaceholder")} />
                         </SelectTrigger>
                         <SelectContent>
-                          {EFFORT_LEVELS.map((o) => (
+                          {effortLevels(format).map((o) => (
                             <SelectItem key={o.value} value={o.value}>
                               {t(o.labelKey)}
                             </SelectItem>
@@ -837,7 +899,7 @@ export default function LLMPage() {
                       <div className="flex items-center gap-2">
                         <span className="truncate font-medium text-sm">{p.name}</span>
                         <Badge variant="outline" className="uppercase">
-                          {p.format}
+                          {providerPreset(p.format).label}
                         </Badge>
                       </div>
                       <code className="mt-1 block truncate font-mono text-muted-foreground text-xs">{p.model}</code>

@@ -468,10 +468,12 @@ export interface UpdateProgress {
 }
 
 // ---- LLM config ----
+export type LLMProvider = "anthropic" | "openai" | "openai-responses" | "grok" | "deepseek";
+
 export interface LLMProfile {
   id: string;
   name: string;
-  format: "openai" | "anthropic";
+  format: LLMProvider;
   base_url?: string;
   proxy?: string;
   model: string;

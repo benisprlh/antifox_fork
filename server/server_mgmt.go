@@ -1534,7 +1534,25 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := body.LLMProfile
-	p.APIKey = body.APIKey
+	cfg := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, body.APIKey, p.Proxy)
+	cfg.ReasoningEffort = p.ReasoningEffort
+	if _, err := cfg.NewProvider(); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if p.ID > 0 && cfg.APIKey == "" {
+		previous, err := pg.ProfileByID(p.ID)
+		if err != nil || previous == nil {
+			writeErr(w, 404, "LLM profile was not found")
+			return
+		}
+		oldCfg := agent.ConfigFrom(previous.Format, previous.Model, previous.BaseURL, previous.APIKey, previous.Proxy)
+		if previous.APIKey != "" && !sameLLMCredentialScope(cfg, oldCfg) {
+			writeErr(w, 400, providerKeyRequired)
+			return
+		}
+	}
+	p.Format, p.Model, p.BaseURL, p.APIKey = cfg.Provider(), cfg.Model, cfg.BaseURL, cfg.APIKey
 	id, err := pg.SaveProfile(&p)
 	if err != nil {
 		writeErr(w, 500, err.Error())

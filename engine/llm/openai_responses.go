@@ -35,6 +35,7 @@ type orReq struct {
 	Temperature     *float64      `json:"temperature,omitempty"`
 	Stream          bool          `json:"stream"`
 	Store           bool          `json:"store"`
+	Include         []string      `json:"include,omitempty"`
 }
 
 type orReasoning struct {
@@ -45,13 +46,38 @@ type orReasoning struct {
 // function_call / function_call_output item. omitempty keeps each shape minimal
 // so the API sees exactly one well-formed variant per item.
 type orInputItem struct {
-	Type      string `json:"type,omitempty"`
-	Role      string `json:"role,omitempty"`
-	Content   string `json:"content,omitempty"`
-	CallID    string `json:"call_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	Output    string `json:"output,omitempty"`
+	ProviderItem json.RawMessage `json:"-"`
+	Type         string          `json:"type,omitempty"`
+	Role         string          `json:"role,omitempty"`
+	Content      string          `json:"content,omitempty"`
+	CallID       string          `json:"call_id,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Arguments    string          `json:"arguments,omitempty"`
+	Output       string          `json:"output,omitempty"`
+}
+
+func (i orInputItem) MarshalJSON() ([]byte, error) {
+	if len(i.ProviderItem) > 0 {
+		return i.ProviderItem, nil
+	}
+	type plain orInputItem
+	return json.Marshal(plain(i))
+}
+
+type orOutputItem struct {
+	Type    string `json:"type"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	Summary []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"summary"`
+	CallID           string `json:"call_id"`
+	Name             string `json:"name"`
+	Arguments        string `json:"arguments"`
+	EncryptedContent string `json:"encrypted_content"`
 }
 
 type orTool struct {
@@ -65,7 +91,7 @@ func (p *openaiResponsesProvider) buildBody(req CompletionRequest, stream bool) 
 	body := orReq{
 		Model:           p.cfg.Model,
 		Instructions:    joinSystem(req.System),
-		Input:           toResponsesInput(req.Messages),
+		Input:           toResponsesInput(req.Messages, p.cfg.Format),
 		MaxOutputTokens: req.MaxTokens,
 		Temperature:     req.Temperature,
 		Stream:          stream,
@@ -77,6 +103,13 @@ func (p *openaiResponsesProvider) buildBody(req CompletionRequest, stream bool) 
 	if req.Thinking != "disabled" && p.cfg.ReasoningEffort != "" {
 		body.Reasoning = &orReasoning{Effort: p.cfg.ReasoningEffort}
 	}
+	if p.cfg.Format == FormatGrok && req.Thinking == "disabled" {
+		// Grok cannot turn reasoning off; use its lowest effort for compaction.
+		body.Reasoning = &orReasoning{Effort: "low"}
+	}
+	if p.cfg.Format == FormatGrok {
+		body.Include = []string{"reasoning.encrypted_content"}
+	}
 	for _, t := range req.Tools {
 		body.Tools = append(body.Tools, orTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.InputSchema})
 	}
@@ -85,10 +118,9 @@ func (p *openaiResponsesProvider) buildBody(req CompletionRequest, stream bool) 
 
 // toResponsesInput flattens neutral messages into Responses input items: text
 // becomes a role message (string content), tool_use becomes a function_call, and
-// tool_result becomes a function_call_output. Thinking blocks are dropped on
-// replay (mirrors the Chat Completions adapter's default and avoids echoing
-// provider-specific reasoning state the Responses API manages itself).
-func toResponsesInput(msgs []Message) []orInputItem {
+// tool_result becomes a function_call_output. Opaque encrypted reasoning is
+// replayed unchanged for the same provider so stateless tool runs retain context.
+func toResponsesInput(msgs []Message, format Format) []orInputItem {
 	var out []orInputItem
 	for _, m := range msgs {
 		role := string(m.Role)
@@ -104,6 +136,11 @@ func toResponsesInput(msgs []Message) []orInputItem {
 		}
 		for _, b := range m.Content {
 			switch b.Type {
+			case BlockReasoning:
+				if b.ProviderFormat == format && len(b.ProviderItem) > 0 {
+					flushText()
+					out = append(out, orInputItem{ProviderItem: b.ProviderItem})
+				}
 			case BlockText:
 				text.WriteString(b.Text)
 			case BlockToolUse:
@@ -167,6 +204,7 @@ func (p *openaiResponsesProvider) Stream(ctx context.Context, req CompletionRequ
 			if !ok {
 				continue
 			}
+			ev.ProviderFormat = p.cfg.Format
 			if !yield(ev, nil) {
 				return
 			}
@@ -175,7 +213,7 @@ func (p *openaiResponsesProvider) Stream(ctx context.Context, req CompletionRequ
 }
 
 // parseResponsesFrame maps one named Responses SSE event to a neutral
-// StreamEvent. Unrecognized events (response.created, *.in_progress, item.done,
+// StreamEvent. Unrecognized events (response.created, *.in_progress,
 // content_part.*, etc.) return ok=false and are skipped.
 func parseResponsesFrame(event, data string) (StreamEvent, bool, error) {
 	// The event name is authoritative; some gateways omit the SSE `event:` line
@@ -183,13 +221,8 @@ func parseResponsesFrame(event, data string) (StreamEvent, bool, error) {
 	var f struct {
 		Type string `json:"type"`
 		// output_item.added: item carries the function_call id/name.
-		Item struct {
-			Type      string `json:"type"`
-			CallID    string `json:"call_id"`
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		} `json:"item"`
-		Delta    string `json:"delta"` // *_text.delta / function_call_arguments.delta
+		Item     json.RawMessage `json:"item"`
+		Delta    string          `json:"delta"` // *_text.delta / function_call_arguments.delta
 		Response struct {
 			Status            string `json:"status"`
 			IncompleteDetails *struct {
@@ -208,10 +241,16 @@ func parseResponsesFrame(event, data string) (StreamEvent, bool, error) {
 	if kind == "" {
 		kind = f.Type
 	}
+	var item orOutputItem
+	_ = json.Unmarshal(f.Item, &item)
 	switch kind {
 	case "response.output_item.added":
-		if f.Item.Type == "function_call" {
-			return StreamEvent{Type: SEToolUseStart, ToolID: f.Item.CallID, ToolName: f.Item.Name}, true, nil
+		if item.Type == "function_call" {
+			return StreamEvent{Type: SEToolUseStart, ToolID: item.CallID, ToolName: item.Name}, true, nil
+		}
+	case "response.output_item.done":
+		if item.Type == "reasoning" && item.EncryptedContent != "" {
+			return StreamEvent{Type: SEReasoningItem, ProviderItem: f.Item}, true, nil
 		}
 	case "response.output_text.delta":
 		if f.Delta != "" {
@@ -263,7 +302,13 @@ func (p *openaiResponsesProvider) Complete(ctx context.Context, req CompletionRe
 	if err != nil {
 		return Message{}, "", Usage{}, err
 	}
-	return parseResponsesResponse(raw)
+	message, stop, usage, err := parseResponsesResponse(raw)
+	for i := range message.Content {
+		if message.Content[i].Type == BlockReasoning {
+			message.Content[i].ProviderFormat = p.cfg.Format
+		}
+	}
+	return message, stop, usage, err
 }
 
 type orUsage struct {
@@ -290,22 +335,8 @@ func (u orUsage) norm() Usage {
 // thinking block, function_call → tool_use block (ID = call_id).
 func parseResponsesResponse(raw []byte) (Message, string, Usage, error) {
 	var r struct {
-		Output []struct {
-			Type    string `json:"type"`
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-			Summary []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"summary"`
-			CallID    string `json:"call_id"`
-			Name      string `json:"name"`
-			Arguments string `json:"arguments"`
-		} `json:"output"`
-		Status            string `json:"status"`
+		Output            []json.RawMessage `json:"output"`
+		Status            string            `json:"status"`
 		IncompleteDetails *struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
@@ -326,7 +357,11 @@ func parseResponsesResponse(raw []byte) (Message, string, Usage, error) {
 	}
 	var blocks []ContentBlock
 	hasToolCall := false
-	for _, item := range r.Output {
+	for _, rawItem := range r.Output {
+		var item orOutputItem
+		if err := json.Unmarshal(rawItem, &item); err != nil {
+			return Message{}, "", usage, err
+		}
 		switch item.Type {
 		case "message":
 			for _, c := range item.Content {
@@ -335,6 +370,9 @@ func parseResponsesResponse(raw []byte) (Message, string, Usage, error) {
 				}
 			}
 		case "reasoning":
+			if item.EncryptedContent != "" {
+				blocks = append(blocks, ContentBlock{Type: BlockReasoning, ProviderItem: rawItem})
+			}
 			// A reasoning item carries its thinking in `summary` (summary_text parts)
 			// and/or in `content` (reasoning_text parts). The streaming path already
 			// accepts both — response.reasoning_summary_text.delta and

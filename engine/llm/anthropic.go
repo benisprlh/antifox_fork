@@ -340,15 +340,12 @@ func (u anthropicUsage) norm() Usage {
 func filterThinkingBlocks(msgs []Message, thinkingEnabled bool) []Message {
 	out := make([]Message, 0, len(msgs))
 	for _, m := range msgs {
-		content := m.Content
-		if !thinkingEnabled {
-			filtered := make([]ContentBlock, 0, len(content))
-			for _, b := range content {
-				if b.Type != BlockThinking {
-					filtered = append(filtered, b)
-				}
+		content := make([]ContentBlock, 0, len(m.Content))
+		for _, b := range m.Content {
+			if b.Type == BlockReasoning || (!thinkingEnabled && b.Type == BlockThinking) {
+				continue // Opaque Responses items are not Anthropic content blocks.
 			}
-			content = filtered
+			content = append(content, b)
 		}
 		if len(content) == 0 {
 			continue // empty content array is rejected by Anthropic — drop it

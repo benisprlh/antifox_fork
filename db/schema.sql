@@ -200,7 +200,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS llm_profiles (
     id               BIGSERIAL PRIMARY KEY,
     name             TEXT NOT NULL UNIQUE,
-    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic')),
+    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses','grok','deepseek')),
     base_url         TEXT,
     proxy            TEXT,
     model            TEXT NOT NULL,
@@ -214,6 +214,10 @@ CREATE TABLE IF NOT EXISTS llm_profiles (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Upgrade existing installations whose original constraint allowed only two providers.
+ALTER TABLE llm_profiles DROP CONSTRAINT IF EXISTS llm_profiles_format_check;
+ALTER TABLE llm_profiles ADD CONSTRAINT llm_profiles_format_check
+    CHECK (format IN ('openai','anthropic','openai-responses','grok','deepseek'));
 CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_one_default ON llm_profiles(is_default) WHERE is_default;
 DROP TRIGGER IF EXISTS trg_llm_upd ON llm_profiles;
 CREATE TRIGGER trg_llm_upd BEFORE UPDATE ON llm_profiles

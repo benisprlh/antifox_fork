@@ -1075,8 +1075,13 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.APIKey == "" {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
+		previous := s.llmCfg
 		s.cfgMu.Unlock()
+		if previous.APIKey != "" && !sameLLMCredentialScope(cfg, previous) {
+			writeErr(w, 400, providerKeyRequired)
+			return
+		}
+		cfg.APIKey = previous.APIKey
 	}
 	if cfg.APIKey == "" {
 		writeErr(w, 400, "api_key required")
@@ -1113,14 +1118,27 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// API key precedence: form input, selected profile's stored key, then global key.
 	// Stored keys are never returned to the browser, so profile tests retrieve them from the DB.
 	if cfg.APIKey == "" && req.ProfileID != nil {
-		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			cfg.APIKey = p.APIKey
+		p, err := s.m.pg.ProfileByID(*req.ProfileID)
+		if err != nil || p == nil {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": "Selected LLM profile was not found"})
+			return
 		}
+		previous := agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy)
+		if p.APIKey != "" && !sameLLMCredentialScope(cfg, previous) {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": providerKeyRequired})
+			return
+		}
+		cfg.APIKey = p.APIKey
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && req.ProfileID == nil {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey
+		previous := s.llmCfg
 		s.cfgMu.Unlock()
+		if previous.APIKey != "" && !sameLLMCredentialScope(cfg, previous) {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": providerKeyRequired})
+			return
+		}
+		cfg.APIKey = previous.APIKey
 	}
 	if cfg.APIKey == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "No API key provided"})

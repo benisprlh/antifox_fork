@@ -87,50 +87,35 @@ func compactionConfig(windowTokens int) *compaction.Config {
 
 // FromEnv resolves the LLM provider config:
 //
-//	ANTIFOX_LLM_PROVIDER = anthropic|openai (default: inferred from keys)
+//	ANTIFOX_LLM_PROVIDER = anthropic|openai|openai-responses|grok|deepseek (default: inferred from keys)
 //	ANTIFOX_LLM_MODEL    = model id        (default: per provider)
 //	ANTIFOX_LLM_BASE_URL = endpoint        (optional)
 //	ANTIFOX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
-//	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
+//	ANTHROPIC_API_KEY / OPENAI_API_KEY / XAI_API_KEY / DEEPSEEK_API_KEY = credentials
 func FromEnv() (Config, bool) {
-	prov := os.Getenv("ANTIFOX_LLM_PROVIDER")
-	anthKey := os.Getenv("ANTHROPIC_API_KEY")
-	oaiKey := os.Getenv("OPENAI_API_KEY")
-
+	prov := strings.ToLower(strings.TrimSpace(os.Getenv("ANTIFOX_LLM_PROVIDER")))
+	if prov == "xai" {
+		prov = "grok"
+	}
+	keyEnvs := map[string]string{"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "openai-responses": "OPENAI_API_KEY", "grok": "XAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 	if prov == "" {
-		switch {
-		case anthKey != "":
-			prov = "anthropic"
-		case oaiKey != "":
-			prov = "openai"
-		default:
-			return Config{}, false
+		for _, name := range []string{"anthropic", "openai", "grok", "deepseek"} {
+			if strings.TrimSpace(os.Getenv(keyEnvs[name])) != "" {
+				prov = name
+				break
+			}
 		}
 	}
-
-	c := Config{
-		BaseURL: os.Getenv("ANTIFOX_LLM_BASE_URL"),
-		Model:   os.Getenv("ANTIFOX_LLM_MODEL"),
-		Proxy:   strings.TrimSpace(os.Getenv("ANTIFOX_LLM_PROXY")),
-	}
-	switch prov {
-	case "openai":
-		c.Format = llm.FormatOpenAI
-		c.APIKey = oaiKey
-		if c.Model == "" {
-			c.Model = "gpt-4o"
-		}
-	default:
-		c.Format = llm.FormatAnthropic
-		c.APIKey = anthKey
-		if c.Model == "" {
-			c.Model = "claude-opus-4-8"
-		}
-	}
-	if c.APIKey == "" {
+	key := strings.TrimSpace(os.Getenv(keyEnvs[prov]))
+	if key == "" {
 		return Config{}, false
 	}
-	return c, true
+	baseURL := os.Getenv("ANTIFOX_LLM_BASE_URL")
+	if baseURL == "" {
+		baseEnv := map[string]string{"anthropic": "ANTHROPIC_BASE_URL", "openai": "OPENAI_BASE_URL", "openai-responses": "OPENAI_BASE_URL", "grok": "XAI_BASE_URL", "deepseek": "DEEPSEEK_BASE_URL"}
+		baseURL = os.Getenv(baseEnv[prov])
+	}
+	return ConfigFrom(prov, os.Getenv("ANTIFOX_LLM_MODEL"), baseURL, key, os.Getenv("ANTIFOX_LLM_PROXY")), true
 }
 
 // ConfigFrom builds a Config from UI-provided strings (provider defaults to
@@ -144,37 +129,46 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		APIKey:  strings.TrimSpace(apiKey),
 		Proxy:   strings.TrimSpace(proxy),
 	}
-	switch strings.TrimSpace(provider) {
-	case "openai":
-		c.Format = llm.FormatOpenAI
+	c.Format = llm.Format(strings.ToLower(strings.TrimSpace(provider)))
+	if c.Format == "" {
+		c.Format = llm.FormatAnthropic
+	} else if c.Format == "xai" {
+		c.Format = llm.FormatGrok
+	}
+	switch c.Format {
+	case llm.FormatOpenAI, llm.FormatDeepSeek:
 		// provider appends "/chat/completions"; tolerate a full endpoint URL.
 		c.BaseURL = strings.TrimRight(strings.TrimSuffix(c.BaseURL, "/chat/completions"), "/")
-		if c.Model == "" {
-			c.Model = "gpt-4o"
-		}
-	default:
-		c.Format = llm.FormatAnthropic
+	case llm.FormatGrok, llm.FormatOpenAIResponses:
+		c.BaseURL = strings.TrimRight(strings.TrimSuffix(c.BaseURL, "/responses"), "/")
+	case llm.FormatAnthropic:
 		// provider appends "/v1/messages".
 		c.BaseURL = strings.TrimRight(strings.TrimSuffix(c.BaseURL, "/v1/messages"), "/")
-		if c.Model == "" {
-			c.Model = "claude-opus-4-8"
-		}
+	}
+	if c.Model == "" {
+		c.Model = llm.DefaultModel(c.Format)
+	}
+	if c.BaseURL == "" && (c.Format == llm.FormatGrok || c.Format == llm.FormatDeepSeek) {
+		c.BaseURL = llm.DefaultBaseURL(c.Format)
 	}
 	return c
 }
 
-// Provider returns the short provider name ("anthropic"/"openai").
+// Provider returns the persisted provider name.
 func (c Config) Provider() string {
-	if c.Format == llm.FormatOpenAI {
-		return "openai"
+	if c.Format == "" {
+		return "anthropic"
 	}
-	return "anthropic"
+	return string(c.Format)
 }
 
 // NewProvider builds an llm.Provider from the config. When a rate is set, the
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
 func (c Config) NewProvider() (llm.Provider, error) {
+	if c.Format == llm.FormatGrok && c.ReasoningEffort == "off" {
+		return nil, fmt.Errorf("Grok reasoning cannot be disabled; select the provider default or an effort level")
+	}
 	lc := llm.Config{
 		Format:  c.Format,
 		BaseURL: c.BaseURL,
@@ -192,6 +186,9 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	default:
 		lc.ThinkingType = "enabled"
 		lc.ReasoningEffort = c.ReasoningEffort
+		if c.Format == llm.FormatGrok && lc.ReasoningEffort == "max" {
+			lc.ReasoningEffort = "xhigh"
+		}
 	}
 	if c.RatePerSecond > 0 || c.RatePerMinute > 0 {
 		lc.RateLimit = &llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}
@@ -255,13 +252,18 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	maxTokens := 32
+	if c.Format == llm.FormatGrok || c.Format == llm.FormatDeepSeek {
+		// Reasoning shares the output budget; leave room to reach the short reply.
+		maxTokens = 4096
+	}
 	start := time.Now()
 	_, err = agentcore.Run(ctx, agentcore.Options{
 		Provider:       prov,
 		SystemPrompt:   []string{"This is a connection test. Reply only OK."},
 		PermissionMode: acperm.ModeBypass,
 		MaxTurns:       1,
-		MaxTokens:      32,
+		MaxTokens:      maxTokens,
 	}, "ping")
 	return time.Since(start), err
 }

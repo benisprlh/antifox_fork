@@ -23,6 +23,7 @@ type BlockType string
 const (
 	BlockText       BlockType = "text"
 	BlockThinking   BlockType = "thinking"
+	BlockReasoning  BlockType = "reasoning" // opaque provider state; never displayed as reasoning text
 	BlockToolUse    BlockType = "tool_use"
 	BlockToolResult BlockType = "tool_result"
 )
@@ -38,8 +39,10 @@ type ContentBlock struct {
 	// Thinking block (extended thinking). Anthropic requires the field to be
 	// named "thinking" (not "text") and requires "signature" when replaying
 	// the block in multi-turn history.
-	Thinking  string `json:"thinking,omitempty"`
-	Signature string `json:"signature,omitempty"`
+	Thinking       string          `json:"thinking,omitempty"`
+	Signature      string          `json:"signature,omitempty"`
+	ProviderItem   json.RawMessage `json:"provider_item,omitempty"`
+	ProviderFormat Format          `json:"provider_format,omitempty"`
 
 	// ToolUse: a model request to invoke a tool.
 	ID    string          `json:"id,omitempty"`
